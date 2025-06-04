@@ -2,18 +2,15 @@
 import os
 import json
 import re
-from typing import Optional, Dict
+from typing import Optional
 
 import google.generativeai as genai
 from dotenv import load_dotenv
 
-from .models import ReviewData
+from .models import BatchReviewData # Changed from ReviewData
 from .constants import (
-    AVAILABLE_MODELS,
-    DEFAULT_MODEL_KEY,
-    DEFAULT_REVIEW_PROMPT_TEMPLATE,
-    USER_CONTEXT_TEMPLATE,
-    USER_FRAMEWORK_CONTEXT_TEMPLATE,
+    AVAILABLE_MODELS, DEFAULT_MODEL_KEY, DEFAULT_REVIEW_PROMPT_TEMPLATE,
+    USER_CONTEXT_TEMPLATE, USER_FRAMEWORK_CONTEXT_TEMPLATE,
     USER_SECURITY_REQUIREMENTS_TEMPLATE
 )
 
@@ -24,53 +21,46 @@ if GEMINI_API_KEY_LOADED:
     genai.configure(api_key=GEMINI_API_KEY_LOADED)
 
 def get_gemini_review(
-    code: str,
-    language: str,
+    code_batch: str, # This is now the concatenated string of multiple files
+    primary_language_hint: str, # e.g., 'php', 'javascript', or 'auto'
     model_key: str = DEFAULT_MODEL_KEY,
     additional_context: Optional[str] = None,
     frameworks_libraries: Optional[str] = None,
     security_requirements: Optional[str] = None,
-) -> Optional[ReviewData]:
+) -> Optional[BatchReviewData]:
     """
-    Gets a code review from the Gemini API with enhanced context.
+    Sends a batch of code files (formatted as a single string) to the Gemini API for review.
     """
     if not GEMINI_API_KEY_LOADED:
-        return ReviewData(summary="API Key Error", error="GEMINI_API_KEY not configured.")
+        return BatchReviewData(error="GEMINI_API_KEY not configured.")
 
-    user_context_section = ""
-    if additional_context and additional_context.strip():
-        user_context_section = USER_CONTEXT_TEMPLATE.format(additional_context=additional_context)
+    user_context_section_str = USER_CONTEXT_TEMPLATE.format(additional_context=additional_context) \
+        if additional_context and additional_context.strip() else ""
+    
+    frameworks_list_str = frameworks_libraries if frameworks_libraries and frameworks_libraries.strip() else "Not specified"
+    user_framework_context_section_str = USER_FRAMEWORK_CONTEXT_TEMPLATE.format(frameworks_libraries=frameworks_list_str) \
+        if frameworks_libraries and frameworks_libraries.strip() else ""
 
-    user_framework_context_section = ""
-    frameworks_libraries_list = "Not specified"
-    if frameworks_libraries and frameworks_libraries.strip():
-        user_framework_context_section = USER_FRAMEWORK_CONTEXT_TEMPLATE.format(frameworks_libraries=frameworks_libraries)
-        frameworks_libraries_list = frameworks_libraries
-        
-    user_security_requirements_section = ""
-    if security_requirements and security_requirements.strip():
-        user_security_requirements_section = USER_SECURITY_REQUIREMENTS_TEMPLATE.format(security_requirements=security_requirements)
-
+    user_security_requirements_section_str = USER_SECURITY_REQUIREMENTS_TEMPLATE.format(security_requirements=security_requirements) \
+        if security_requirements and security_requirements.strip() else ""
 
     prompt = DEFAULT_REVIEW_PROMPT_TEMPLATE.format(
-        user_context_section=user_context_section,
-        user_framework_context_section=user_framework_context_section,
-        user_security_requirements_section=user_security_requirements_section,
-        frameworks_libraries_list=frameworks_libraries_list,
-        language=language,
-        code_to_review=code
+        user_context_section=user_context_section_str,
+        user_framework_context_section=user_framework_context_section_str,
+        user_security_requirements_section=user_security_requirements_section_str,
+        frameworks_libraries_list=frameworks_list_str,
+        language=primary_language_hint, # Hint for the LLM
+        code_batch_to_review=code_batch
     )
 
     actual_model_name = AVAILABLE_MODELS.get(model_key, AVAILABLE_MODELS[DEFAULT_MODEL_KEY])
-    print(f"Using Gemini model: {actual_model_name}") # Feedback to user
+    print(f"Using Gemini model: {actual_model_name} for the batch.")
 
     model_instance = genai.GenerativeModel(
         actual_model_name,
         generation_config={
             "response_mime_type": "application/json",
-            "temperature": 0.1,
-            "top_k": 20,
-            "top_p": 0.8,
+            "temperature": 0.1, "top_k": 20, "top_p": 0.8,
         },
         safety_settings=[
             {"category": "HARM_CATEGORY_HARASSMENT", "threshold": "BLOCK_MEDIUM_AND_ABOVE"},
@@ -80,31 +70,24 @@ def get_gemini_review(
         ]
     )
 
-    input_code_tokens_count = 0
-    additional_context_tokens_count = 0 # For all text-based contexts
-
+    total_input_tokens_count = 0
     try:
-        # Consolidate all textual context for token counting
-        full_prompt_for_tokens = prompt.replace(f"```{language}\n{code}\n```", "") # remove code for separate counting
-        if code:
-            input_code_tokens_count = model_instance.count_tokens(code).total_tokens
-        if full_prompt_for_tokens: # Count tokens for the rest of the prompt and contexts
-             additional_context_tokens_count = model_instance.count_tokens(full_prompt_for_tokens).total_tokens
-
+        total_input_tokens_count = model_instance.count_tokens(prompt).total_tokens
+        print(f"Total estimated tokens for this batch request: {total_input_tokens_count}")
     except Exception as e:
-        print(f"Warning: Could not count tokens - {e}")
+        print(f"Warning: Could not count total tokens for batch - {e}")
 
     try:
-        print("Sending request to Gemini API...")
-        response = model_instance.generate_content(prompt) # Use model_instance
+        print("Sending batch request to Gemini API...")
+        response = model_instance.generate_content(prompt)
 
         if not response.candidates:
-            error_message = "No content generated by API."
+            error_message = "No content generated by API for the batch."
             if response.prompt_feedback and response.prompt_feedback.block_reason:
-                error_message = f"Content generation blocked. Reason: {response.prompt_feedback.block_reason}."
+                error_message = f"Batch content generation blocked. Reason: {response.prompt_feedback.block_reason}."
                 if response.prompt_feedback.safety_ratings:
                     error_message += f" Safety Ratings: {response.prompt_feedback.safety_ratings}"
-            return ReviewData(summary="Review failed due to content blocking or empty response.", error=error_message)
+            return BatchReviewData(error=error_message)
 
         raw_json_text = response.text
         match = re.search(r"```(json)?\s*(.*?)\s*```", raw_json_text, re.DOTALL | re.IGNORECASE)
@@ -112,24 +95,21 @@ def get_gemini_review(
 
         try:
             parsed_data = json.loads(cleaned_json_text)
-            review_data_obj = ReviewData(**parsed_data)
-            review_data_obj.input_code_tokens = input_code_tokens_count
-            # The 'additionalContextTokens' field in ReviewData can now represent all non-code prompt tokens.
-            review_data_obj.additional_context_tokens = additional_context_tokens_count 
-            return review_data_obj
+            batch_review_obj = BatchReviewData(**parsed_data)
+            batch_review_obj.total_input_tokens = total_input_tokens_count
+            return batch_review_obj
         except json.JSONDecodeError as e:
-            err_msg = f"Failed to parse JSON: {e}. Response excerpt: {cleaned_json_text[:500]}"
-            return ReviewData(summary="Review failed: JSON parsing error.", error=err_msg)
+            err_msg = f"Failed to parse JSON batch response: {e}. Response excerpt: {cleaned_json_text[:500]}"
+            return BatchReviewData(error=err_msg)
         except Exception as e: 
-            err_msg = f"Error processing response: {e}. JSON excerpt: {cleaned_json_text[:500]}"
-            return ReviewData(summary="Review failed: Data validation error.", error=err_msg)
+            err_msg = f"Error processing batch response: {e}. JSON excerpt: {cleaned_json_text[:500]}"
+            return BatchReviewData(error=err_msg)
 
     except Exception as e:
-        err_msg = f"Gemini API call error: {e}"
+        err_msg = f"Gemini API call error for batch: {e}"
         try:
-            # Attempt to get block reason even if the main call failed
             if 'response' in locals() and response.prompt_feedback and response.prompt_feedback.block_reason:
                 err_msg += f". API Block Reason: {response.prompt_feedback.block_reason}"
-        except AttributeError: pass # response object might not have prompt_feedback
-        except NameError: pass # response object might not be defined
-        return ReviewData(summary="Review failed: API communication error.", error=err_msg)
+        except AttributeError: pass 
+        except NameError: pass 
+        return BatchReviewData(error=err_msg)

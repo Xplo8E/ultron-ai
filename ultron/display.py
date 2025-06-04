@@ -5,82 +5,66 @@ from rich.panel import Panel
 from rich.text import Text
 from rich.padding import Padding
 from rich.syntax import Syntax
-from enum import Enum # Ensure Enum is imported if used in models for type checking
+from enum import Enum
 
-# Assuming models.py is in the same package (ultron)
-from .models import ReviewData, ReviewIssueTypeEnum, HighConfidenceVulnerabilityIssue, ConfidenceScoreEnum, SeverityAssessmentEnum
+from .models import (
+    BatchReviewData, FileReviewData, HighConfidenceVulnerability, LowPrioritySuggestion,
+    ReviewIssueTypeEnum, ConfidenceScoreEnum, SeverityAssessmentEnum
+)
 
-def display_pretty_review(review_data: ReviewData, console: Console):
-    """
-    Displays the review data in a human-readable format using Rich.
-    """
-    if review_data.error:
-        error_panel_content = Text(review_data.error, style="bold red")
-        if review_data.summary and review_data.summary not in ("Review failed due to API error.", "API Key Error", "Critical review failure."):
-             # Append summary attempt if it exists and isn't just a generic failure message
-             error_panel_content.append(f"\n\nSummary attempt:\n{review_data.summary}", style="yellow")
-        console.print(Panel(error_panel_content, title="[bold red]⚠️ Review Error[/bold red]", border_style="red", expand=False))
+def _render_markdown_to_text(markdown_str: str, console: Console) -> Text:
+    """Helper to render markdown to Text object."""
+    temp_console = Console(record=True, force_terminal=False)
+    temp_console.print(Markdown(markdown_str))
+    return Text.from_ansi(temp_console.export_text())
+
+def _display_single_file_review_details(file_review: FileReviewData, console: Console):
+    """Helper to display details for a single file from a batch review."""
+    if file_review.error:
+        console.print(Panel(Text(file_review.error, style="bold orange"), title=f"⚠️ Error during analysis of {file_review.file_path}"))
         return
 
-    console.print(Panel(Markdown(f"## Review Summary\n\n{review_data.summary if review_data.summary else 'No summary provided.'}"), title="📊 Review Summary", border_style="green", expand=True))
-
-    token_info_parts = []
-    if review_data.input_code_tokens is not None:
-        token_info_parts.append(f"Input Code Tokens: [bold cyan]{review_data.input_code_tokens}[/bold cyan]")
-    if review_data.additional_context_tokens is not None:
-        # This now represents all non-code prompt tokens
-        token_info_parts.append(f"Prompt/Context Tokens: [bold cyan]{review_data.additional_context_tokens}[/bold cyan]")
-
-    if token_info_parts:
-        console.print(Padding(" | ".join(token_info_parts), (0, 1), expand=False))
+    console.print(Panel(Markdown(f"**Summary for `{file_review.file_path}`:**\n\n{file_review.summary if file_review.summary else 'No specific summary for this file.'}"),
+                        title=f"📄 File: {file_review.file_path} (Lang: {file_review.language_detected or 'N/A'})",
+                        border_style="blue", expand=True))
 
     # --- High-Confidence Vulnerabilities ---
-    if review_data.high_confidence_vulnerabilities:
-        console.print(Padding("\n[bold red]🚨 High-Confidence Vulnerabilities & Exploitable Bugs[/bold red]", (1,0,0,0)))
-        for i, vuln in enumerate(review_data.high_confidence_vulnerabilities):
+    if file_review.high_confidence_vulnerabilities:
+        console.print(Padding("[bold red]🚨 High-Confidence Vulnerabilities & Exploitable Bugs[/bold red]", (1,0,0,1)))
+        for i, vuln in enumerate(file_review.high_confidence_vulnerabilities):
             vuln_type_str = vuln.type.value if isinstance(vuln.type, Enum) else str(vuln.type)
             title_text = f"Issue #{i+1}: {vuln_type_str}"
-            
-            title_color = "red" # Default for SECURITY
-            if vuln.type == ReviewIssueTypeEnum.BUG:
-                title_color = "magenta"
-            elif isinstance(vuln.type, str) and "bug" in vuln_type_str.lower(): # Fallback if string is "Bug"
-                title_color = "magenta"
-
+            title_color = "red" if vuln.type == ReviewIssueTypeEnum.SECURITY else "magenta"
+            if isinstance(vuln.type, str) and "bug" in vuln_type_str.lower(): title_color = "magenta"
 
             content = Text()
             content.append(f"Type: {vuln_type_str}\n", style="bold")
-            
-            # Display Confidence and Severity
             meta_info_parts = []
             if vuln.confidence_score:
-                confidence_str = vuln.confidence_score.value if isinstance(vuln.confidence_score, Enum) else str(vuln.confidence_score)
-                meta_info_parts.append(f"Confidence: [bold]{confidence_str}[/bold]")
+                cs_str = vuln.confidence_score.value if isinstance(vuln.confidence_score, Enum) else str(vuln.confidence_score)
+                meta_info_parts.append(f"Confidence: [bold]{cs_str}[/bold]")
             if vuln.severity_assessment:
-                severity_str = vuln.severity_assessment.value if isinstance(vuln.severity_assessment, Enum) else str(vuln.severity_assessment)
-                meta_info_parts.append(f"Severity: [bold]{severity_str}[/bold]")
-            
-            if meta_info_parts:
+                sa_str = vuln.severity_assessment.value if isinstance(vuln.severity_assessment, Enum) else str(vuln.severity_assessment)
+                meta_info_parts.append(f"Severity: [bold]{sa_str}[/bold]")
+            if meta_info_parts: 
                 content.append(" | ".join(meta_info_parts) + "\n", style="dim")
-
             content.append(f"Line: {vuln.line}\n\n", style="bold")
             
-            content.append("Description:\n", style="bold yellow")
-            # Create a new console for capturing markdown output
-            md_console = Console(record=True, force_terminal=False)
-            md_console.print(Markdown(vuln.description, inline_code_theme="monokai"))
-            content.append(md_console.export_text() + "\n")
+            content.append("📝 Description:\n", style="bold yellow")
+            content.append("─" * 50 + "\n", style="dim")
+            content.append(_render_markdown_to_text(vuln.description, console))
+            content.append("\n\n")
             
-            content.append("Impact:\n", style="bold yellow")
-            md_console = Console(record=True, force_terminal=False)
-            md_console.print(Markdown(vuln.impact, inline_code_theme="monokai"))
-            content.append(md_console.export_text() + "\n")
+            content.append("💥 Impact:\n", style="bold yellow")
+            content.append("─" * 50 + "\n", style="dim")
+            content.append(_render_markdown_to_text(vuln.impact, console))
+            content.append("\n\n")
 
             if vuln.proof_of_concept_code_or_command:
-                content.append("\nProof of Concept (Code/Command):\n", style="bold yellow")
-                # Use console to capture syntax highlighted output
-                syntax_console = Console(record=True, force_terminal=False)
-                syntax_console.print(Syntax(
+                content.append("🔬 Proof of Concept (Code/Command):\n", style="bold yellow")
+                content.append("─" * 50 + "\n", style="dim")
+                temp_console = Console(record=True, force_terminal=False)
+                temp_console.print(Syntax(
                     vuln.proof_of_concept_code_or_command,
                     "bash",
                     theme="monokai",
@@ -89,23 +73,25 @@ def display_pretty_review(review_data: ReviewData, console: Console):
                     background_color="default",
                     indent_guides=True
                 ))
-                content.append(syntax_console.export_text())
+                content.append(Text.from_ansi(temp_console.export_text()))
+                content.append("\n")
             
             if vuln.proof_of_concept_explanation:
-                content.append("\nPOC Explanation:\n", style="bold yellow")
-                md_console = Console(record=True, force_terminal=False)
-                md_console.print(Markdown(vuln.proof_of_concept_explanation, inline_code_theme="monokai"))
-                content.append(md_console.export_text() + "\n")
-
+                content.append("📋 POC Explanation:\n", style="bold yellow")
+                content.append("─" * 50 + "\n", style="dim")
+                content.append(_render_markdown_to_text(vuln.proof_of_concept_explanation, console))
+                content.append("\n\n")
+            
             if vuln.poc_actionability_tags:
-                tags_str = ", ".join(vuln.poc_actionability_tags)
-                content.append(f"\nPOC Tags: [{tags_str}]\n", style="italic dim")
-
+                content.append("🏷️ POC Tags:\n", style="bold yellow")
+                content.append("─" * 50 + "\n", style="dim")
+                content.append(f"[{', '.join(vuln.poc_actionability_tags)}]\n\n", style="italic dim")
+            
             if vuln.suggestion:
-                content.append("\nSuggested Fix:\n", style="bold yellow")
-                # Use console to capture syntax highlighted output for suggestion
-                syntax_console = Console(record=True, force_terminal=False)
-                syntax_console.print(Syntax(
+                content.append("🛠️ Suggested Fix:\n", style="bold yellow")
+                content.append("─" * 50 + "\n", style="dim")
+                temp_console = Console(record=True, force_terminal=False)
+                temp_console.print(Syntax(
                     vuln.suggestion,
                     "diff",
                     theme="monokai",
@@ -114,42 +100,77 @@ def display_pretty_review(review_data: ReviewData, console: Console):
                     background_color="default",
                     indent_guides=True
                 ))
-                content.append(syntax_console.export_text())
+                content.append(Text.from_ansi(temp_console.export_text()))
+                content.append("\n")
             
             console.print(Panel(content, title=f"[{title_color}]{title_text}[/{title_color}]", border_style=title_color, expand=True, padding=(1,2)))
-    else:
-        console.print(Panel("✅ No high-confidence exploitable vulnerabilities or critical bugs identified based on the provided code and context.", style="green", expand=False, title="[green]Security Check[/green]"))
+    elif not file_review.error:
+        console.print(Panel("✅ No high-confidence issues found for this file.", style="green", expand=False, title="[green]Security Check[/green]"))
 
     # --- Low-Priority Suggestions ---
-    if review_data.low_priority_suggestions:
-        console.print(Padding("\n[bold yellow]💡 Low-Priority Suggestions & Best Practices[/bold yellow]", (1,0,0,0)))
-        for i, sug in enumerate(review_data.low_priority_suggestions):
+    if file_review.low_priority_suggestions:
+        console.print(Padding("[bold yellow]💡 Low-Priority Suggestions & Best Practices[/bold yellow]", (1,0,0,1)))
+        for i, sug in enumerate(file_review.low_priority_suggestions):
             sug_type_str = sug.type.value if isinstance(sug.type, Enum) else str(sug.type)
             title_text = f"Suggestion #{i+1}: {sug_type_str}"
-            
-            border_color = "yellow" # Default for SUGGESTION or UNKNOWN string types
+            border_color = "yellow"
             if sug.type == ReviewIssueTypeEnum.BEST_PRACTICE: border_color = "blue"
             elif sug.type == ReviewIssueTypeEnum.PERFORMANCE: border_color = "magenta"
             elif sug.type == ReviewIssueTypeEnum.STYLE: border_color = "cyan"
-            # Add more elif for string fallbacks if needed
-
+            
             content = Text()
             content.append(f"Type: {sug_type_str}\n", style="bold")
             content.append(f"Line: {sug.line}\n\n", style="bold")
-            content.append("Description:\n", style="bold")
-            content.append(Markdown(sug.description, inline_code_theme="monokai")) # Render as Markdown
-            content.append("\n")
-
+            
+            content.append("📝 Description:\n", style="bold")
+            content.append("─" * 50 + "\n", style="dim")
+            content.append(_render_markdown_to_text(sug.description, console))
+            content.append("\n\n")
+            
             if sug.suggestion:
-                content.append("\nSuggestion:\n", style="bold")
-                content.append(Syntax(sug.suggestion, "diff", theme="monokai", line_numbers=False, word_wrap=True, background_color="default", indent_guides=True))
+                content.append("🛠️ Suggestion:\n", style="bold")
+                content.append("─" * 50 + "\n", style="dim")
+                temp_console = Console(record=True, force_terminal=False)
+                temp_console.print(Syntax(
+                    sug.suggestion,
+                    "diff",
+                    theme="monokai",
+                    line_numbers=False,
+                    word_wrap=True,
+                    background_color="default",
+                    indent_guides=True
+                ))
+                content.append(Text.from_ansi(temp_console.export_text()))
+                content.append("\n")
             
             console.print(Panel(content, title=f"[{border_color}]{title_text}[/{border_color}]", border_style=border_color, expand=True, padding=(1,2)))
-    elif not review_data.high_confidence_vulnerabilities : # Only show if no major issues either
-        console.print(Panel("👍 No low-priority suggestions noted.", style="green", expand=False, title="[green]Suggestions[/green]"))
-    elif review_data.high_confidence_vulnerabilities and not review_data.low_priority_suggestions:
-         console.print("\nNo further low-priority suggestions noted.", style="italic dim")
+    elif not file_review.high_confidence_vulnerabilities and not file_review.error:
+         console.print(Panel("👍 No low-priority suggestions noted for this file.", style="green", expand=False, title="[green]Suggestions[/green]"))
 
+def display_pretty_batch_review(batch_review_data: BatchReviewData, console: Console):
+    """
+    Displays the batch review data, iterating through each file's review.
+    """
+    if batch_review_data.error:
+        console.print(Panel(Text(batch_review_data.error, style="bold red"), title="[bold red]⚠️ Batch Review Error[/bold red]", border_style="red", expand=False))
+        return
+
+    if batch_review_data.overall_batch_summary:
+        console.print(Panel(Markdown(f"## Overall Batch Summary\n\n{batch_review_data.overall_batch_summary}"), title="📦 Batch Overview", border_style="green", expand=True))
+    
+    if batch_review_data.llm_processing_notes:
+        console.print(Panel(Markdown(f"**LLM Processing Notes:**\n{batch_review_data.llm_processing_notes}"), title="ℹ️ LLM Notes", border_style="yellow", expand=False))
+
+    if batch_review_data.total_input_tokens is not None:
+        console.print(Padding(f"Total Input Tokens for Entire Batch Request: [bold cyan]{batch_review_data.total_input_tokens}[/bold cyan]", (0,1), expand=False))
+
+    if not batch_review_data.file_reviews:
+        console.print(Panel("[yellow]No individual file reviews were returned in this batch.[/yellow]", title="File Reviews", border_style="yellow"))
+    else:
+        for i, file_review in enumerate(batch_review_data.file_reviews):
+            if i > 0: console.rule(style="dim blue") # Separator between files
+            _display_single_file_review_details(file_review, console)
+    
     # Create a centered footer text
     footer = Text("\nPowered by Google Gemini 🚀", style="dim italic")
     footer.justify = "center"

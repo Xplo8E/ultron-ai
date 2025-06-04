@@ -12,6 +12,7 @@ Implementation:
 Use language-specific libraries (e.g., Python's ast module, radon for complexity, or tools like pyan for call graphs; similar tools exist for other languages).
 When analyzing a specific function in file_A.py that calls a function in file_B.py, extract the signature and a brief summary (or even the full body if small) of the called function from file_B.py and include it as context for the LLM.
 Benefit: Provides the LLM with relevant cross-file context without overwhelming it with entire unrelated files.
+
 - [] B. Smart Chunking for Large Files:
 
 Concept: If a single file exceeds the practical context window or desired token limit for cost/latency, break it into smaller, logical chunks.

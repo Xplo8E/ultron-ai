@@ -1,10 +1,12 @@
 # src/ultron/sarif_converter.py
-from typing import List, Optional, Dict, Union
+from typing import List, Optional, Dict, Union as PyUnion
 from pathlib import Path
 from enum import Enum
 
-
-from .models import ReviewData, HighConfidenceVulnerabilityIssue, LowPrioritySuggestionIssue, ReviewIssueTypeEnum, SeverityAssessmentEnum
+from .models import (
+    BatchReviewData, FileReviewData, HighConfidenceVulnerability, LowPrioritySuggestion,
+    ReviewIssueTypeEnum, SeverityAssessmentEnum
+)
 from .sarif_models import (
     SarifLog, SarifRun, SarifTool, SarifToolComponent, SarifResult,
     SarifReportingDescriptor, SarifLocation, SarifPhysicalLocation,
@@ -12,67 +14,74 @@ from .sarif_models import (
 )
 from . import __version__ as ultron_version
 
-
-def _level_from_issue(issue: Union[HighConfidenceVulnerabilityIssue, LowPrioritySuggestionIssue]) -> str:
-    if isinstance(issue, HighConfidenceVulnerabilityIssue):
+def _level_from_issue(issue: PyUnion[HighConfidenceVulnerability, LowPrioritySuggestion]) -> str:
+    if isinstance(issue, HighConfidenceVulnerability):
         if issue.severity_assessment:
+            sev = issue.severity_assessment
+            sev_str = sev.value if isinstance(sev, Enum) else str(sev)
             sev_map = {
-                SeverityAssessmentEnum.CRITICAL: "error",
-                SeverityAssessmentEnum.HIGH: "error",
-                SeverityAssessmentEnum.MEDIUM: "warning",
-                SeverityAssessmentEnum.LOW: "note" # or "warning"
+                "Critical": "error", "High": "error",
+                "Medium": "warning", "Low": "note"
             }
-            # Handle if severity_assessment is string
-            return sev_map.get(issue.severity_assessment if isinstance(issue.severity_assessment, Enum) else SeverityAssessmentEnum(str(issue.severity_assessment).capitalize()), "warning")
-        return "error" # Default for high confidence
-    return "note" # Default for low priority
+            return sev_map.get(sev_str.capitalize(), "warning")
+        return "error"
+    return "note"
 
-def _generate_rule_id(issue: Union[HighConfidenceVulnerabilityIssue, LowPrioritySuggestionIssue]) -> str:
-    # Basic rule ID, can be made more specific e.g. ULTRON-SECURITY-SQLI
-    issue_type_str = str(issue.type.value if isinstance(issue.type, Enum) else issue.type).upper().replace(" ", "_")
-    return f"ULTRON-{issue_type_str}"
+def _generate_rule_id(issue_type: PyUnion[ReviewIssueTypeEnum, str]) -> str:
+    type_str = issue_type.value if isinstance(issue_type, Enum) else str(issue_type)
+    return f"ULTRON-{type_str.upper().replace(' ', '_').replace('.', '')}"
+
+def convert_batch_review_to_sarif(batch_review_data: BatchReviewData, tool_name: str = "Ultron Code Reviewer") -> SarifLog:
+    all_results: List[SarifResult] = []
+    rules_map: Dict[str, SarifReportingDescriptor] = {}
+
+    if batch_review_data.error: # Handle batch level error
+        # Optionally create a notification result for the batch error
+        # For now, returning an empty valid SARIF if there's a top-level error
+         pass
 
 
-def convert_review_to_sarif(review_data: ReviewData, file_path: Optional[Path] = None, tool_name: str = "Ultron Code Reviewer") -> SarifLog:
-    results: List[SarifResult] = []
-    rules_map: Dict[str, SarifReportingDescriptor] = {} # To store unique rules
+    for file_review in batch_review_data.file_reviews:
+        if file_review.error: # Skip files that had individual processing errors by LLM
+            # Optionally create a notification for this file-specific error
+            continue
 
-    all_issues = review_data.high_confidence_vulnerabilities + review_data.low_priority_suggestions
+        file_path = Path(file_review.file_path) # Ensure it's a Path object
+        all_issues_for_file = file_review.high_confidence_vulnerabilities + file_review.low_priority_suggestions
 
-    for issue in all_issues:
-        rule_id = _generate_rule_id(issue)
-        
-        if rule_id not in rules_map:
-            rules_map[rule_id] = SarifReportingDescriptor(
-                id=rule_id,
-                name=str(issue.type.value if isinstance(issue.type, Enum) else issue.type),
-                short_description={"text": f"Issue of type: {issue.type.value if isinstance(issue.type, Enum) else issue.type}"},
-                full_description={"text": issue.description[:200]} # Truncate for brevity
+        for issue in all_issues_for_file:
+            rule_id = _generate_rule_id(issue.type)
+            
+            if rule_id not in rules_map:
+                issue_type_str = issue.type.value if isinstance(issue.type, Enum) else str(issue.type)
+                rules_map[rule_id] = SarifReportingDescriptor(
+                    id=rule_id,
+                    name=issue_type_str,
+                    short_description={"text": f"Ultron issue: {issue_type_str}"},
+                    full_description={"text": issue.description[:250] + ('...' if len(issue.description) > 250 else '')}
+                )
+
+            message_text = f"[{issue.type.value if isinstance(issue.type, Enum) else str(issue.type)}] {issue.description}"
+            if isinstance(issue, HighConfidenceVulnerability) and issue.impact:
+                 message_text += f"\nImpact: {issue.impact}"
+            if issue.suggestion:
+                message_text += f"\nSuggestion: {issue.suggestion}"
+            
+            sarif_result = SarifResult(
+                ruleId=rule_id,
+                level=_level_from_issue(issue),
+                message={"text": message_text}
             )
 
-        message_text = f"{issue.type.value if isinstance(issue.type, Enum) else issue.type}: {issue.description}"
-        if hasattr(issue, 'impact') and issue.impact: # For HighConfidenceVulnerabilityIssue
-             message_text += f"\nImpact: {issue.impact}"
-        if issue.suggestion:
-            message_text += f"\nSuggestion: {issue.suggestion}"
-        
-        sarif_result = SarifResult(
-            ruleId=rule_id,
-            level=_level_from_issue(issue),
-            message={"text": message_text}
-        )
-
-        if file_path:
-            # Try to convert line to int, handle 'N/A' or ranges if your model provides them
             start_line = None
             try:
-                if isinstance(issue.line, str) and '-' in issue.line: # e.g. "10-15"
+                if isinstance(issue.line, str) and '-' in issue.line:
                     start_line = int(issue.line.split('-')[0])
-                elif issue.line != "N/A":
+                elif str(issue.line).lower() != "n/a":
                     start_line = int(issue.line)
-            except ValueError:
-                pass # Keep start_line as None
+            except ValueError: pass
 
+            # Use as_uri() for proper file URI format
             sarif_result.locations = [
                 SarifLocation(
                     physicalLocation=SarifPhysicalLocation(
@@ -81,17 +90,15 @@ def convert_review_to_sarif(review_data: ReviewData, file_path: Optional[Path] =
                     )
                 )
             ]
-        results.append(sarif_result)
+            all_results.append(sarif_result)
 
     tool_component = SarifToolComponent(
         name=tool_name,
         version=ultron_version,
         rules=list(rules_map.values()) if rules_map else None
     )
-
     sarif_run = SarifRun(
         tool=SarifTool(driver=tool_component),
-        results=results if results else None # SARIF spec allows empty results array or no results property
+        results=all_results if all_results else None
     )
-
     return SarifLog(version=SarifVersion.V2_1_0, runs=[sarif_run])
