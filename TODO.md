@@ -1,6 +1,13 @@
 
 # TODO
 
+- [] i wanna use gemini-2.5-flash-preview-04-17 thinking model for better results, so we will add a feature to opt to thinking mode and normal mode, in thinking mode we will use 2.5 model, in normal mode we will use 2.0 model, and in thinking mode we have to restructre some part for the thinking.
+
+can we do that without ruining the codebase
+
+
+
+--------------------------
 
 1. Advanced Context Management for the LLM
 When analyzing a file, its interaction with other parts of the codebase is crucial for accuracy.

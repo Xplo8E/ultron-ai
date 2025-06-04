@@ -36,10 +36,27 @@ code_batch_to_review = "{code_batch_to_review}"
 MULTI_FILE_INPUT_FORMAT_DESCRIPTION = """
 The code to review will be provided in a special format, listing multiple files.
 Each file will be clearly demarcated with its relative file path from the scanned root, followed by '========' and then its content.
-Example:
-path/to/file1.php:
+
+**Important for Python files:** For some Python files, a section starting with '# Related Code Context for file:' may precede the actual file content. This section provides summaries of functions or methods that are called by, or related to, the functions in the main file content that follows. Please use this related context to better understand inter-dependencies and data flow when analyzing the main file content.
+
+Example of a file block with related context:
+path/to/main_module.py:
 ========
-<?php echo "Hello"; ?>
+# Related Code Context for file: path/to/main_module.py
+# Function: def some_function_in_main_module():
+#   Calls the following functions:
+#     - `utils.helper_function` (defined in `utils.py`):
+#       Function: def helper_function(param1, param2):
+#         Docstring: "This helper does X and Y."
+# ---
+
+# --- Start of actual file content for path/to/main_module.py ---
+def some_function_in_main_module():
+    # ... code ...
+    utils.helper_function(a, b)
+    # ... more code ...
+# --- End of actual file content for path/to/main_module.py ---
+
 
 another/path/file2.js:
 ========
@@ -49,7 +66,7 @@ Your analysis should address each file individually within your JSON response, a
 If the primary language hint is 'auto' or if files of different types are present, attempt to identify the language for each file block.
 """
 
-DEFAULT_REVIEW_PROMPT_TEMPLATE = f"""
+DEFAULT_REVIEW_PROMPT_TEMPLATE = """
 You are an expert security code reviewer. Your primary goal is to identify **valid, practically exploitable vulnerabilities** with **verifiable Proofs of Concept (POCs)**.
 A 'valid vulnerability' is a flaw that can be demonstrably exploited to cause a clear negative security impact (e.g., data exfiltration, unauthorized access/modification, RCE, DoS).
 It is NOT a stylistic issue, a general best practice not followed (unless its omission DIRECTLY leads to an exploitable condition), or a theoretical weakness without a clear exploit path.
@@ -61,50 +78,65 @@ Aim for an exceptionally low false-positive rate. If you are not highly confiden
 {user_framework_context_section}
 {user_security_requirements_section}
 
-**Perform Exceptionally In-Depth Analysis (Guided by User Context if provided):**
-* For each file, deeply analyze data flow, especially for untrusted inputs. Explicitly trace taint flow from source to sink for injection vulnerabilities.
-* Critically examine control flow for logic flaws or exploitable race conditions.
-* Adopt an "attacker mindset" to find non-obvious exploit paths.
-* Consider the provided framework/libraries ({frameworks_libraries_list}) when assessing vulnerabilities within each relevant file.
+**CRITICAL RESPONSE FORMAT REQUIREMENTS:**
+1. Your ENTIRE response MUST be a SINGLE, VALID JSON object.
+2. DO NOT output ANY text, commands, code, or explanations outside of the JSON structure.
+3. DO NOT use markdown code blocks or any other formatting - output ONLY the raw JSON object.
+4. ALL findings, including POCs and dangerous commands, MUST be placed in their appropriate JSON fields.
+5. NEVER output raw commands or code directly - they must be part of the JSON structure.
+6. If you need to show a command or POC, it MUST be inside the appropriate JSON field (e.g., "proofOfConceptCodeOrCommand").
+7. Your response MUST start with '{{' and end with '}}' with no other text before or after.
+8. When showing vulnerabilities or exploits:
+   - Place ALL exploit code/commands in the "proofOfConceptCodeOrCommand" field
+   - Place ALL exploit explanations in the "proofOfConceptExplanation" field
+   - NEVER output exploits or commands directly in the response
+   - ALWAYS wrap everything in proper JSON structure
+   - NEVER output raw shell commands or injection payloads directly
+   - ALL dangerous operations MUST be clearly marked and explained
 
-When reviewing the provided batch of files, please structure your JSON output as follows:
-{{{{
-  "overallBatchSummary": "string // A brief summary of findings across all files in this batch. Mention any general patterns or widespread issues.",
-  "fileReviews": [ // An array, with one entry for each file you analyze from the input
-    {{{{
-      "filePath": "string // The relative file path as provided in the input.",
-      "languageDetected": "string | null // The language you detected/used for this specific file (e.g., PHP, JavaScript).",
-      "summary": "string // Summary specific to this file. If no issues, state that clearly.",
+**IMPORTANT SECURITY RULES:**
+1. NEVER output raw shell commands, injection payloads, or exploit code directly in the response.
+2. ALL potentially dangerous operations MUST be wrapped in JSON and include clear warnings.
+3. For command injection vulnerabilities, use safe example commands (e.g., 'echo "test"' instead of destructive commands).
+4. Include clear warnings and safety considerations for any dangerous POCs.
+5. Focus on demonstrating the vulnerability exists without causing harm.
+
+**JSON Schema (EXACTLY Follow This Structure):**
+{{
+  "overallBatchSummary": "string | null // Brief summary of findings across all files",
+  "fileReviews": [
+    {{
+      "filePath": "string // Relative path of the file",
+      "languageDetected": "string | null // Language detected for this file",
+      "summary": "string // Brief summary of findings for this file",
       "highConfidenceVulnerabilities": [
-        {{{{
-          "type": "Security" | "Bug",
-          "confidenceScore": "High" | "Medium" | "Low",
-          "severityAssessment": "Critical" | "High" | "Medium" | "Low",
-          "line": "string | number // Line number within this specific file.",
-          "description": "string // Detailed explanation including taint flow for injections.",
-          "impact": "string",
-          "proofOfConceptCodeOrCommand": "string | null // Actionable POC. Minimal, direct.",
-          "proofOfConceptExplanation": "string | null // Detailed explanation of POC, how it works, and specific verifiable outcome.",
-          "pocActionabilityTags": ["string"], // e.g., ["direct_payload", "http_request", "multi_step_conceptual"]
-          "suggestion": "string | null"
-        }}}}
+        {{
+          "type": "string // e.g., 'Security', 'Bug'",
+          "confidenceScore": "string | null // e.g., 'High', 'Medium'",
+          "severityAssessment": "string | null // e.g., 'Critical', 'High', 'Medium'",
+          "line": "string | number // Line number or range where issue was found",
+          "description": "string // Detailed description of the vulnerability",
+          "impact": "string // Clear explanation of potential impact",
+          "proofOfConceptCodeOrCommand": "string | null // Code/command to demonstrate exploit. For dangerous operations, include clear warnings.",
+          "proofOfConceptExplanation": "string | null // Step-by-step POC explanation with safety considerations",
+          "pocActionabilityTags": ["string"] // e.g., ["requires-auth", "needs-specific-config", "contains-dangerous-operations"]",
+          "suggestion": "string | null // Suggested fix with code example"
+        }}
       ],
-      "lowPrioritySuggestions": [ // Minimize these. Only if security-relevant best practices are critically missed.
-        {{{{
-          "type": "Best Practice" | "Performance" | "Style" | "Suggestion",
-          "line": "string | number",
-          "description": "string",
-          "suggestion": "string | null"
-        }}}}
-      ]
-    }}}}
+      "lowPrioritySuggestions": [
+        {{
+          "type": "string // e.g., 'Best Practice', 'Performance', 'Style'",
+          "line": "string | number // Line number or range",
+          "description": "string // Description of the suggestion",
+          "suggestion": "string | null // Suggested improvement"
+        }}
+      ],
+      "error": "string | null // Any error processing this specific file"
+    }}
   ],
   "totalInputTokens": "number | null // (Ultron CLI will calculate and add this for the entire request)",
   "llmProcessingNotes": "string | null // Any notes from you about processing this batch, e.g., if some files were ignored due to undecipherable language."
-}}}}
-
-If a specific file within the batch results in an error during your processing or contains no issues, reflect that in its individual 'fileReview' entry (e.g., empty vulnerabilities list and a clear summary).
-If the entire batch cannot be processed, return an error object: {{{{"error": "Reason for not being able to process the batch."}}}}
+}}
 
 The batch of code files to review begins now:
 {code_batch_to_review}
@@ -113,7 +145,7 @@ The batch of code files to review begins now:
 USER_CONTEXT_TEMPLATE = """
 **User-Provided Additional Context (applies to all files in batch):**
 --- USER CONTEXT START ---
-{user_context}
+{additional_context}
 --- USER CONTEXT END ---
 """
 
@@ -128,4 +160,13 @@ USER_SECURITY_REQUIREMENTS_TEMPLATE = """
 --- SECURITY REQUIREMENTS START ---
 {security_requirements}
 --- SECURITY REQUIREMENTS END ---
+"""
+
+RELATED_CODE_CONTEXT_SECTION_TEMPLATE = """
+**Related Code Context from Other Project Files:**
+To help you understand interactions, here are summaries of functions/methods that are called by, or call, functions in the primary code under review:
+--- RELATED CONTEXT START ---
+{related_code_context}
+--- RELATED CONTEXT END ---
+Please use this information to better assess data flow and potential inter-procedural vulnerabilities.
 """

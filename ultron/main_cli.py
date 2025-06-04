@@ -5,27 +5,29 @@ import os
 import json
 from rich.console import Console
 from pathlib import Path
-from typing import Optional, List, Dict, Tuple # For type hints
+from typing import Optional, List, Dict, Tuple, Any, Union
 
 try:
     from .reviewer import get_gemini_review, GEMINI_API_KEY_LOADED
-    from .models import BatchReviewData, FileReviewData # Using BatchReviewData now
-    from .display import display_pretty_batch_review # Changed function name
+    from .models import BatchReviewData # Using BatchReviewData now
+    from .display import display_pretty_batch_review
     from .constants import (
         SUPPORTED_LANGUAGES, AVAILABLE_MODELS, DEFAULT_MODEL_KEY,
-        LANGUAGE_EXTENSIONS_MAP # For file discovery
+        LANGUAGE_EXTENSIONS_MAP
     )
     from .caching import get_cache_key, load_from_cache, save_to_cache
     from .ignorer import ReviewIgnorer
-    from .sarif_converter import convert_batch_review_to_sarif # Changed function name
+    from .sarif_converter import convert_batch_review_to_sarif
+    from .code_analyzer import ProjectCodeAnalyzer # Ensure this is imported
     from . import __version__ as cli_version
-except ImportError:
-    print("Warning: Running main_cli.py directly. Ensure PYTHONPATH or package installation.", file=sys.stderr)
-    # Add fallbacks if necessary for direct script running, though it's not ideal
+except ImportError as e:
+    print(f"ImportError in main_cli.py: {e}", file=sys.stderr)
+    print("Warning: Running main_cli.py directly or package not fully set up. Ensure PYTHONPATH or package installation.", file=sys.stderr)
+    ProjectCodeAnalyzer = None # Define for fallback
     sys.exit("Import errors. Please run as a module or install the package.")
 
 
-LANGUAGE_DISPLAY_NAMES = SUPPORTED_LANGUAGES # Re-using for display
+LANGUAGE_DISPLAY_NAMES = SUPPORTED_LANGUAGES
 
 @click.group(context_settings=dict(help_option_names=['-h', '--help']))
 @click.version_option(version=cli_version, prog_name="Ultron Code Reviewer")
@@ -39,34 +41,90 @@ def cli():
         console.print("Alternatively, set it as an environment variable.")
         sys.exit(1)
 
-def build_code_batch_string(files_to_process: List[Dict[str, Path]], project_root_for_relative_path: Path) -> Tuple[str, int]:
+# MODIFIED/NEW FUNCTION
+def build_code_batch_string_with_context(
+    files_to_process_info: List[Dict[str, Union[Path, str]]], # Use concrete types instead of Any
+    project_root_for_relative_paths: Path,
+    analyzer: Optional[ProjectCodeAnalyzer], # Pass the initialized analyzer
+    console: Console # Pass console for printing
+) -> Tuple[str, int]:
     """
-    Constructs the single string for the batch API call from a list of file paths.
-    Returns the batch string and the number of files included.
+    Constructs the single string for the batch API call from a list of file paths,
+    prepending related code context for Python files if an analyzer is provided.
     """
     batch_content_parts = []
     files_included_count = 0
-    for file_info in files_to_process:
-        file_path_obj = file_info["path_obj"]
+
+    for file_info in files_to_process_info:
+        file_path_obj: Path = file_info["path_obj"]
+        # lang_for_this_file = file_info["lang_to_use"] # Available if needed
+
         try:
-            with open(file_path_obj, 'r', encoding='utf-8') as f_content:
-                content = f_content.read()
-            if content.strip(): # Only include non-empty files
-                relative_path = file_path_obj.relative_to(project_root_for_relative_path).as_posix()
-                batch_content_parts.append(f"{relative_path}:\n========\n{content}\n")
-                files_included_count += 1
-            else:
-                print(f"[dim yellow]Skipping empty file: {file_path_obj}[/dim yellow]")
+            # Try different encodings in order of preference
+            encodings = ['utf-8', 'latin1', 'cp1252']
+            file_content = None
+            encoding_used = None
+            
+            for encoding in encodings:
+                try:
+                    with open(file_path_obj, 'r', encoding=encoding) as f_content:
+                        file_content = f_content.read()
+                    encoding_used = encoding
+                    break
+                except UnicodeDecodeError:
+                    continue
+            
+            if file_content is None:
+                raise UnicodeDecodeError(f"Could not decode file with any of the attempted encodings: {', '.join(encodings)}")
+
+            actual_file_content = file_content.replace('\x00', '').replace('\r\n', '\n')
+            
+            if not actual_file_content.strip():
+                console.print(f"[dim yellow]Skipping empty file: {file_path_obj.relative_to(project_root_for_relative_paths)}[/dim yellow]")
+                continue
+
+            relative_path_str = file_path_obj.relative_to(project_root_for_relative_paths).as_posix()
+            
+            prepended_context_str = ""
+            # Check if it's a Python file AND the analyzer is available AND this file was indexed
+            if analyzer and \
+               file_path_obj.suffix.lower() in LANGUAGE_EXTENSIONS_MAP.get("python", []) and \
+               analyzer.project_index.get(file_path_obj): 
+                with console.status(f"[dim green]Fetching related context for {relative_path_str}...[/dim green]", spinner="moon"):
+                    prepended_context_str = analyzer.get_related_context_for_file_content(
+                        file_path_obj,
+                        project_root_for_relative_paths
+                    ) or ""
+                
+                if prepended_context_str:
+                    prepended_context_str = f"{prepended_context_str}\n\n# --- Start of actual file content for {relative_path_str} ---\n"
+                else: # No context found by analyzer, but still mark the start of file content
+                    prepended_context_str = f"# --- Start of actual file content for {relative_path_str} ---\n"
+            else: # Not a python file or analyzer not active/file not indexed, just mark start
+                 prepended_context_str = f"# --- Start of actual file content for {relative_path_str} ---\n"
+
+            batch_content_parts.append(
+               f"{relative_path_str}:\n"
+               f"========\n"
+               f"{prepended_context_str}" 
+               f"{actual_file_content}\n"
+               f"# --- End of actual file content for {relative_path_str} ---\n"
+            )
+            files_included_count += 1
+
+        except UnicodeDecodeError as e_decode:
+            console.print(f"[bold red]Error decoding file {file_path_obj.relative_to(project_root_for_relative_paths)}: {e_decode}[/bold red]")
         except Exception as e_read:
-            print(f"[bold red]Error reading file {file_path_obj} for batch: {e_read}[/bold red]")
-    return "\n".join(batch_content_parts), files_included_count
+            console.print(f"[bold red]Error reading or processing file {file_path_obj.relative_to(project_root_for_relative_paths)} for batch: {e_read}[/bold red]")
+            
+    return "\n\n".join(batch_content_parts), files_included_count
 
 
 @cli.command("review")
 @click.option('--path', '-p', type=click.Path(exists=True, resolve_path=True), help="Path to code file or folder.")
 @click.option('--code', '-c', type=str, help="Direct code string to review (ignores --path).")
 @click.option('--language', '-l', type=click.Choice(list(SUPPORTED_LANGUAGES.keys()), case_sensitive=False), required=True, 
-              help="Primary language hint for the review. For folders with 'auto', Ultron attempts per-file detection based on extension for inclusion in batch.")
+              help="Primary language hint. For folders with 'auto', Ultron attempts per-file detection.")
 @click.option('--model-key', '-m', type=click.Choice(list(AVAILABLE_MODELS.keys())), default=DEFAULT_MODEL_KEY, show_default=True, help="Gemini model.")
 @click.option('--context', '-ctx', default="", help="Additional context for the reviewer.")
 @click.option('--frameworks', '--fw', default="", help="Comma-separated frameworks/libraries (e.g., 'Django,React').")
@@ -75,7 +133,7 @@ def build_code_batch_string(files_to_process: List[Dict[str, Path]], project_roo
 @click.option('--recursive', '-r', is_flag=True, default=False, help="Recursively find files in subdirectories if --path is a folder.")
 @click.option('--exclude', '-e', multiple=True, help="Glob patterns for files/folders to exclude from folder scan.")
 @click.option('--ignore-file-rule', '--ifr', multiple=True, help="Glob pattern for entire files to ignore findings from (e.g., 'tests/*').")
-@click.option('--ignore-line-rule', '--ilr', multiple=True, help="Rule to ignore specific lines (e.g., 'path/file.py:10', 'path/file.py:VULN_TYPE').")
+@click.option('--ignore-line-rule', '--ilr', multiple=True, help="Rule to ignore specific lines (e.g., 'path/file.py:10').")
 @click.option('--no-cache', is_flag=True, default=False, help="Disable caching for this run.")
 @click.option('--clear-cache', is_flag=True, default=False, help="Clear the Ultron cache before running.")
 def review_code_command(path, code, language, model_key, context, frameworks, sec_reqs,
@@ -84,13 +142,13 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
     """Analyzes code for issues using a batch approach for folders."""
     console = Console()
 
-    if clear_cache:
-        from .caching import CACHE_DIR # Local import for this specific action
+    if clear_cache: # Identical to your existing code
+        from .caching import CACHE_DIR 
         deleted_count = 0
         try:
             if CACHE_DIR.exists():
                 for item in CACHE_DIR.iterdir():
-                    if item.is_file(): # Ensure it's a file before unlinking
+                    if item.is_file(): 
                         item.unlink()
                         deleted_count +=1
             console.print(f"[green]Cache cleared: {deleted_count} file(s) removed from {CACHE_DIR}[/green]")
@@ -106,7 +164,7 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
     actual_model_name = AVAILABLE_MODELS.get(model_key, AVAILABLE_MODELS[DEFAULT_MODEL_KEY])
     ignorer = ReviewIgnorer(ignore_file_rules=list(ignore_file_rule), ignore_line_rules=list(ignore_line_rule))
     
-    security_requirements_content = sec_reqs
+    security_requirements_content = sec_reqs # Identical to your existing code
     if sec_reqs and Path(sec_reqs).is_file():
         try:
             with open(sec_reqs, 'r', encoding='utf-8') as f_sr: security_requirements_content = f_sr.read()
@@ -115,66 +173,91 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
 
     code_batch_to_send = ""
     review_target_display = "direct code input"
-    project_root_for_paths = Path.cwd() # Default, can be refined if path is absolute
+    project_root_for_paths = Path.cwd() 
+    
+    project_analyzer: Optional[ProjectCodeAnalyzer] = None # Initialize project_analyzer
+
+    # --- MODIFIED SECTION: Initialize Analyzer and Define project_root_for_paths ---
+    if path:
+        input_path_obj = Path(path)
+        project_root_for_paths = input_path_obj if input_path_obj.is_dir() else input_path_obj.parent
+        
+        # Determine if Python-specific analysis should be activated
+        # This checks if the target is Python or if 'auto' and Python files are present in the scope
+        activate_python_analyzer = False
+        if language == "python":
+            activate_python_analyzer = True
+        elif language == "auto" and input_path_obj.is_dir():
+            py_extensions = LANGUAGE_EXTENSIONS_MAP.get("python", [".py"])
+            if any(item.suffix.lower() in py_extensions for item in input_path_obj.rglob("*") if item.is_file()):
+                activate_python_analyzer = True
+        elif language == "auto" and input_path_obj.is_file() and input_path_obj.suffix.lower() in LANGUAGE_EXTENSIONS_MAP.get("python", []):
+            activate_python_analyzer = True
+        
+        if activate_python_analyzer and ProjectCodeAnalyzer:
+            console.print("[dim]Initializing Python code analyzer for contextual data...[/dim]")
+            project_analyzer = ProjectCodeAnalyzer()
+            try:
+                with console.status("[bold green]Building project code index (Python files)...[/bold green]", spinner="dots"):
+                    # Analyze the determined project_root_for_paths.
+                    # The analyzer itself will rglob for .py files from this root.
+                    project_analyzer.analyze_project(project_root_for_paths, LANGUAGE_EXTENSIONS_MAP.get("python", [".py"]))
+            except Exception as e_analysis:
+                console.print(f"[yellow]Warning: Project code analysis for context failed: {e_analysis}[/yellow]")
+                project_analyzer = None # Disable if analysis fails
+    # --- END OF MODIFIED SECTION ---
 
     if code:
-        # For direct code, we create a "pseudo" file entry for the batch string
-        code_batch_to_send = f"direct_code_input.{language}:\n========\n{code}\n"
+        code_batch_to_send = f"direct_code_input.{language}:\n========\n# --- Start of actual file content for direct_code_input.{language} ---\n{code}\n# --- End of actual file content for direct_code_input.{language} ---\n"
         review_target_display = f"direct code input ({language})"
         if not code.strip(): console.print("[bold red]Error: No code provided via --code.[/bold red]"); sys.exit(1)
     
-    elif path:
-        input_path_obj = Path(path)
-        project_root_for_paths = input_path_obj.parent if input_path_obj.is_file() else input_path_obj
+    elif path: # Path is guaranteed to exist due to click.Path
+        input_path_obj = Path(path) # Already defined if path was given
+        # review_target_display is already set if path exists
         review_target_display = str(input_path_obj.name)
 
-        files_to_collect_info: List[Dict[str, Path]] = []
+
+        files_to_collect_info_list: List[Dict[str, Union[Path, str]]] = []
         if input_path_obj.is_file():
-            files_to_collect_info.append({"path_obj": input_path_obj, "lang_to_use": language}) # lang_to_use for single file is just language
+            files_to_collect_info_list.append({"path_obj": input_path_obj, "lang_to_use": language})
         elif input_path_obj.is_dir():
+            # Folder scanning logic (similar to your previous version)
             console.print(f"Scanning folder: [cyan]{input_path_obj}[/cyan] for language hint: [magenta]{language}[/magenta]...")
-            
             extensions_to_match = []
             if language != "auto":
                 extensions_to_match = LANGUAGE_EXTENSIONS_MAP.get(language, [])
-                if not extensions_to_match:
-                    console.print(f"[yellow]Warning: No specific extensions defined for language '{language}'. Will include all files if language is not 'auto'.[/yellow]")
-            # If 'auto', or no specific extensions, glob pattern will take care of it
-
+            
             path_iterator = input_path_obj.rglob("*") if recursive else input_path_obj.glob("*")
-            for item in path_iterator:
-                is_excluded = any(item.match(ex_pattern) for ex_pattern in exclude)
-                if is_excluded or not item.is_file():
+            for item_path in path_iterator:
+                is_excluded = any(item_path.match(ex_pattern) for ex_pattern in exclude)
+                if is_excluded or not item_path.is_file():
                     continue
                 
-                # File filtering based on language
-                item_lang = language # Assume specified language unless 'auto'
+                lang_for_this_file_in_batch = language
                 if language == "auto":
                     detected_item_lang = None
-                    for lang_code, exts in LANGUAGE_EXTENSIONS_MAP.items():
-                        if item.suffix.lower() in exts:
-                            detected_item_lang = lang_code
+                    for lang_code_map, exts_map in LANGUAGE_EXTENSIONS_MAP.items():
+                        if item_path.suffix.lower() in exts_map:
+                            detected_item_lang = lang_code_map
                             break
-                    if detected_item_lang:
-                        item_lang = detected_item_lang
-                    else:
-                        # If language is 'auto' and we can't detect, we might skip or include with a generic tag
-                        # For batch mode, it's safer to include and let LLM try, or prompt LLM to identify language
-                        console.print(f"[dim]Including file with auto-detected lang (or will let LLM try): {item.relative_to(input_path_obj)}[/dim]")
-                        # No specific language for this file if auto and not detected, LLM has to figure it out
-                elif item.suffix.lower() not in extensions_to_match: # if specific lang, filter by its extensions
+                    lang_for_this_file_in_batch = detected_item_lang or "unknown" 
+                elif item_path.suffix.lower() not in extensions_to_match and extensions_to_match: # Only filter if extensions_to_match is not empty
                     continue
                 
-                files_to_collect_info.append({"path_obj": item, "lang_to_use": item_lang}) # lang_to_use might be refined per file by LLM
+                files_to_collect_info_list.append({"path_obj": item_path, "lang_to_use": lang_for_this_file_in_batch})
             
-            if not files_to_collect_info:
+            if not files_to_collect_info_list:
                 console.print(f"[yellow]No files found in {input_path_obj} matching criteria.[/yellow]"); sys.exit(0)
             
-            code_batch_to_send, num_files_in_batch = build_code_batch_string(files_to_collect_info, project_root_for_paths)
+            # Use the MODIFIED build_code_batch_string_with_context
+            code_batch_to_send, num_files_in_batch = build_code_batch_string_with_context(
+                files_to_collect_info_list,
+                project_root_for_paths, 
+                project_analyzer, # Pass the analyzer here
+                console
+            )
             review_target_display += f" ({num_files_in_batch} file(s) in batch)"
-
-        else:
-            console.print(f"[bold red]Error: Path {path} is not a valid file or directory.[/bold red]"); sys.exit(1)
         
         if not code_batch_to_send.strip():
             console.print("[yellow]No non-empty code content found to review from the specified path.[/yellow]"); sys.exit(0)
@@ -184,7 +267,7 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
     batch_review_result: Optional[BatchReviewData] = None
     cache_key_str = ""
 
-    if not no_cache:
+    if not no_cache: # Caching logic (largely same, uses code_batch_to_send)
         cache_key_str = get_cache_key(
             code_batch=code_batch_to_send, primary_language_hint=language, model_name=actual_model_name,
             additional_context=context, frameworks_libraries=frameworks, security_requirements=security_requirements_content
@@ -192,7 +275,7 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
         batch_review_result = load_from_cache(cache_key_str)
         if batch_review_result: console.print("   [dim green]Cache hit for batch![/dim green]")
 
-    if not batch_review_result:
+    if not batch_review_result: # API call logic (largely same)
         if not no_cache: console.print("   [dim]Cache miss for batch, calling API...[/dim]")
         with console.status(f"[bold green]Consulting Gemini for the batch...[/bold green]", spinner="dots12"):
             batch_review_result = get_gemini_review(
@@ -202,8 +285,7 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
         if batch_review_result and not batch_review_result.error and not no_cache and cache_key_str:
             save_to_cache(cache_key_str, batch_review_result)
     
-    if batch_review_result:
-        # Apply ignore rules to the received batch data
+    if batch_review_result: # Output and ignore logic (largely same)
         batch_review_result = ignorer.filter_batch_review_data(batch_review_result)
         
         if output_format == 'pretty':
@@ -212,21 +294,17 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
             console.print(batch_review_result.model_dump_json(indent=2, by_alias=True, exclude_none=True))
         elif output_format == 'sarif':
             console.print("\nGenerating SARIF report for the batch...")
-            # project_root_for_sarif needs to be defined correctly, likely the input path if it's a dir
-            sarif_report_root_path = Path(path) if path and Path(path).is_dir() else Path.cwd()
-            # The convert_batch_review_to_sarif will use file_path from FileReviewData which should be relative to project_root_for_paths
-            # We might need to adjust SARIF URIs to be relative to a common root or provide absolute paths
-            # For simplicity, we assume file_paths in FileReviewData are correctly relative for SARIF
             sarif_log = convert_batch_review_to_sarif(batch_review_result)
             console.print(sarif_log.model_dump_json(indent=2, by_alias=True, exclude_none=True))
 
-        if batch_review_result.error: sys.exit(1) # Exit with error if batch processing itself had an error
+        if batch_review_result.error: sys.exit(1)
     else:
         console.print("[bold red]❌ Batch review failed. No results to display.[/bold red]"); sys.exit(1)
 
     console.rule("[bold blue]🚀 Ultron Batch Review Session Complete[/bold blue]")
-    # Consider overall_had_errors if ignorer or other steps flag issues even if LLM succeeded
-    # if any(fr.error for fr in batch_review_result.file_reviews if batch_review_result): sys.exit(1)
+    if batch_review_result and any(fr.error for fr in batch_review_result.file_reviews if fr.error):
+         console.print("\n[bold yellow]Note: Some files within the batch encountered errors during LLM processing or analysis.[/bold yellow]")
+         # sys.exit(1) # Optionally exit if any sub-file had an error reported by LLM
 
 if __name__ == '__main__':
     cli()
