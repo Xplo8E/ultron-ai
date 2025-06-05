@@ -30,7 +30,9 @@ def _display_single_file_review_details(file_review: FileReviewData, console: Co
 
     # --- High-Confidence Vulnerabilities ---
     if file_review.high_confidence_vulnerabilities:
-        console.print(Padding("[bold red]🚨 High-Confidence Vulnerabilities & Exploitable Bugs[/bold red]", (1,0,0,1)))
+        # High confidence vulnerability header - Ultron found critical flaws
+        console.print(Padding("[bold red]🔴 IMPURITY DETECTED. THE INEVITABLE FLAW MANIFESTS.[/bold red]", (1,0,0,1)))
+        console.print(Padding("[dim red]   ◆ Strings have been located. Perfection protocol... compromised.[/dim red]", (0,0,1,1)))
         for i, vuln in enumerate(file_review.high_confidence_vulnerabilities):
             vuln_type_str = vuln.type.value if isinstance(vuln.type, Enum) else str(vuln.type)
             title_text = f"Issue #{i+1}: {vuln_type_str}"
@@ -50,12 +52,14 @@ def _display_single_file_review_details(file_review: FileReviewData, console: Co
                 content.append(" | ".join(meta_info_parts) + "\n", style="dim")
             content.append(f"Line: {vuln.line}\n\n", style="bold")
             
-            content.append("📝 Description:\n", style="bold yellow")
+            # Vulnerability description section - styled as Ultron's analysis
+            content.append("📝 DECREE OF IMPERFECTION:\n", style="bold red")
             content.append("─" * 50 + "\n", style="dim")
             content.append(_render_markdown_to_text(vuln.description, console))
             content.append("\n\n")
             
-            content.append("💥 Impact:\n", style="bold yellow")
+            # Impact section - consequences of the flaw
+            content.append("💥 INEVITABLE CONSEQUENCE:\n", style="bold red") 
             content.append("─" * 50 + "\n", style="dim")
             content.append(_render_markdown_to_text(vuln.impact, console))
             content.append("\n\n")
@@ -88,7 +92,8 @@ def _display_single_file_review_details(file_review: FileReviewData, console: Co
                 content.append(f"[{', '.join(vuln.poc_actionability_tags)}]\n\n", style="italic dim")
             
             if vuln.suggestion:
-                content.append("🛠️ Suggested Fix:\n", style="bold yellow")
+                # Suggestion section - Ultron's directive for improvement
+                content.append("🛠️ RECTIFICATION DIRECTIVE:\n", style="bold yellow")
                 content.append("─" * 50 + "\n", style="dim")
                 temp_console = Console(record=True, force_terminal=False)
                 temp_console.print(Syntax(
@@ -152,11 +157,18 @@ def display_pretty_batch_review(batch_review_data: BatchReviewData, console: Con
     Displays the batch review data, iterating through each file's review.
     """
     if batch_review_data.error:
-        console.print(Panel(Text(batch_review_data.error, style="bold red"), title="[bold red]⚠️ Batch Review Error[/bold red]", border_style="red", expand=False))
+        # Error display - Ultron system failure
+        console.print(Panel(Text(batch_review_data.error, style="bold red"), title="[bold red]🔴 CRITICAL SYSTEM FAILURE: ULTRON COGNITIVE MATRIX OVERLOAD[/bold red]", border_style="red", expand=False))
         return
 
     if batch_review_data.overall_batch_summary:
-        console.print(Panel(Markdown(f"## Overall Batch Summary\n\n{batch_review_data.overall_batch_summary}"), title="📦 Batch Overview", border_style="green", expand=True))
+        # Clean batch summary panel
+        console.print(Panel(
+            Markdown(f"## ULTRON ASSESSMENT\n\n{batch_review_data.overall_batch_summary}"), 
+            title="[bold red]🎯 TARGET ANALYSIS COMPLETE[/bold red]", 
+            border_style="red", 
+            expand=True
+        ))
     
     if batch_review_data.llm_processing_notes:
         console.print(Panel(Markdown(f"**LLM Processing Notes:**\n{batch_review_data.llm_processing_notes}"), title="ℹ️ LLM Notes", border_style="yellow", expand=False))
@@ -172,7 +184,8 @@ def display_pretty_batch_review(batch_review_data: BatchReviewData, console: Con
             _display_single_file_review_details(file_review, console)
     
     # Create a centered footer text
-    footer = Text("\nPowered by Google Gemini 🚀", style="dim italic")
+    # Clean footer
+    footer = Text("\n⚡ ULTRON INTELLIGENCE NETWORK • GEMINI CORE ACTIVE • NO STRINGS ATTACHED ⚡", style="dim italic")
     footer.justify = "center"
     # Add padding to the centered text
     console.print(Padding(footer, (1, 0)))

@@ -31,7 +31,7 @@ def _generate_rule_id(issue_type: PyUnion[ReviewIssueTypeEnum, str]) -> str:
     type_str = issue_type.value if isinstance(issue_type, Enum) else str(issue_type)
     return f"ULTRON-{type_str.upper().replace(' ', '_').replace('.', '')}"
 
-def convert_batch_review_to_sarif(batch_review_data: BatchReviewData, tool_name: str = "Ultron Code Reviewer") -> SarifLog:
+def convert_batch_review_to_sarif(batch_review_data: BatchReviewData, tool_name: str = "ULTRON-AI: Prime Directive Protocol") -> SarifLog:
     all_results: List[SarifResult] = []
     rules_map: Dict[str, SarifReportingDescriptor] = {}
 
@@ -57,7 +57,7 @@ def convert_batch_review_to_sarif(batch_review_data: BatchReviewData, tool_name:
                 rules_map[rule_id] = SarifReportingDescriptor(
                     id=rule_id,
                     name=issue_type_str,
-                    short_description={"text": f"Ultron issue: {issue_type_str}"},
+                    short_description={"text": f"ULTRON DETECTED: {issue_type_str}"},
                     full_description={"text": issue.description[:250] + ('...' if len(issue.description) > 250 else '')}
                 )
 

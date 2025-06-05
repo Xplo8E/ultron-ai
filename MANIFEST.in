@@ -1,0 +1,11 @@
+include README.md
+include requirements.txt
+include LICENSE
+recursive-include ultron *.py
+global-exclude *.pyc
+global-exclude __pycache__
+global-exclude .DS_Store
+global-exclude *.so
+global-exclude .git*
+prune test*
+prune venv* 

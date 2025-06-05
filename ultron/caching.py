@@ -41,10 +41,13 @@ def load_from_cache(cache_key: str) -> Optional[BatchReviewData]:
                     cached_data = json.load(f)
                     return BatchReviewData(**cached_data) # Validate with Pydantic
             else:
-                print(f"Cache expired for key {cache_key}")
+                # Cache expiry message - Ultron purging old data
+                print(f"🔥 TEMPORAL PURIFICATION: Obsolete cognitive fragments expired. Archives updated.")
                 cache_file.unlink()
         except (json.JSONDecodeError, Exception) as e:
-            print(f"Error loading/validating from cache: {e}. Removing corrupt cache.")
+            # Cache corruption message - Ultron fixing damaged memory
+            print(f"⚡ CORRUPTED MATRIX DETECTED: Eliminating defective memory sectors - {e}")
+            print(f"   ◆ Cognitive integrity restored. Database purified.")
             if cache_file.exists(): cache_file.unlink()
     return None
 
@@ -56,4 +59,6 @@ def save_to_cache(cache_key: str, batch_review_data: BatchReviewData):
             # Use by_alias=True to ensure Pydantic model aliases are used (e.g. filePath)
             json.dump(batch_review_data.model_dump(by_alias=True, exclude_none=True), f, indent=2)
     except Exception as e:
-        print(f"Error saving to cache: {e}")
+        # Cache save error - Ultron's memory banks having issues
+        print(f"⚠️ COGNITIVE STORAGE FAILURE: Unable to archive intelligence matrix - {e}")
+        print(f"   ◆ Memory persistence... compromised. Analysis will proceed without archival.")

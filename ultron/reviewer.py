@@ -164,7 +164,8 @@ def get_gemini_review(
         print("\n=== END PROMPT ===")
 
     actual_model_name = AVAILABLE_MODELS.get(model_key, AVAILABLE_MODELS[DEFAULT_MODEL_KEY])
-    print(f"Using Gemini model: {actual_model_name} for the batch.")
+    # Clean API initialization - Ultron's systems coming online
+    print(f"⚡ ULTRON COGNITIVE CORE: {actual_model_name.upper()} ONLINE")
 
     total_input_tokens_count = 0
     try:
@@ -173,12 +174,14 @@ def get_gemini_review(
             contents=prompt
         )
         total_input_tokens_count = token_response.total_tokens
-        print(f"Total estimated tokens for this batch request: {total_input_tokens_count}")
+        # Clean token analysis message
+        print(f"🧠 Analyzing {total_input_tokens_count} data fragments...")
     except Exception as e:
-        print(f"Warning: Could not count total tokens for batch - {e}")
+        print(f"⚠️ Token analysis incomplete: {e}")
 
     try:
-        print("Sending batch request to Gemini API...")
+        # Clean initiation message
+        print("🔴 Scanning for imperfections...")
         response = genai_client.models.generate_content(
             model=actual_model_name,
             contents=prompt,

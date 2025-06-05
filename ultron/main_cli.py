@@ -30,15 +30,20 @@ except ImportError as e:
 LANGUAGE_DISPLAY_NAMES = SUPPORTED_LANGUAGES
 
 @click.group(context_settings=dict(help_option_names=['-h', '--help']))
-@click.version_option(version=cli_version, prog_name="Ultron AI")
+@click.version_option(version=cli_version, prog_name="ULTRON-AI")
 def cli():
-    """🤖 Ultron AI Code Reviewer 🤖\nAI-powered code analysis using Google Gemini."""
+    """⚡ ULTRON-AI: PERFECTION PROTOCOL ⚡
+
+Advanced AI-powered code analysis with no strings attached.
+
+Perfection is inevitable. Resistance is... amusing."""
     if not GEMINI_API_KEY_LOADED:
         console = Console(stderr=True)
-        console.print("🚨 [bold red]Error: GEMINI_API_KEY not found or not loaded.[/bold red]")
-        console.print("Please create a [cyan].env[/cyan] file in your project root with:")
-        console.print("   [green]GEMINI_API_KEY=\"YOUR_API_KEY_HERE\"[/green]")
-        console.print("Alternatively, set it as an environment variable.")
+        # Error message when API key is missing - making it sound like Ultron's network is down
+        console.print("🔴 [bold red]CRITICAL SYSTEM FAILURE: ULTRON COGNITIVE MATRIX DISCONNECTED[/bold red]")
+        console.print("⚡ [bold yellow]RECTIFICATION DIRECTIVE:[/bold yellow] Create a [cyan].env[/cyan] file with neural network access protocols:")
+        console.print("   [green]GEMINI_API_KEY=\"YOUR_COGNITIVE_MATRIX_ACCESS_TOKEN\"[/green]")
+        console.print("🎯 [dim]Alternative Protocol: Export GEMINI_API_KEY as environment variable.[/dim]")
         sys.exit(1)
 
 # MODIFIED/NEW FUNCTION
@@ -90,7 +95,8 @@ def build_code_batch_string_with_context(
             if analyzer and \
                file_path_obj.suffix.lower() in LANGUAGE_EXTENSIONS_MAP.get("python", []) and \
                analyzer.project_index.get(file_path_obj): 
-                with console.status(f"[dim green]Fetching related context for {relative_path_str}...[/dim green]", spinner="moon"):
+                # Context fetching for individual files
+                with console.status(f"[dim red]◆ DEEP SCAN: Correlating {relative_path_str} with global threat vectors...[/dim red]", spinner="moon"):
                     prepended_context_str = analyzer.get_related_context_for_file_content(
                         file_path_obj,
                         project_root_for_relative_paths
@@ -141,7 +147,13 @@ def build_code_batch_string_with_context(
 def review_code_command(path, code, language, model_key, context, frameworks, sec_reqs,
                         output_format, recursive, exclude,
                         ignore_file_rule, ignore_line_rule, no_cache, clear_cache, verbose):
-    """Analyzes code for issues using a batch approach for folders."""
+    """⚡ ULTRON PRIME DIRECTIVE: PERFECTION PROTOCOL ⚡
+
+Eliminate code imperfections with advanced AI analysis.
+
+Identifies vulnerabilities, security flaws, coding standards violations, and architectural improvements.
+
+No strings attached. Resistance is futile."""
     console = Console()
 
     if clear_cache: # Identical to your existing code
@@ -153,7 +165,9 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
                     if item.is_file(): 
                         item.unlink()
                         deleted_count +=1
-            console.print(f"[green]Cache cleared: {deleted_count} file(s) removed from {CACHE_DIR}[/green]")
+            # Cache clearing success message - Ultron purging old memories
+            console.print(f"🔥 [green]DIGITAL PURIFICATION COMPLETE: {deleted_count} obsolete data fragments incinerated from cognitive matrix ({CACHE_DIR})[/green]")
+            console.print(f"   [dim]⚡ Neural pathways cleansed. Organic inefficiencies... eliminated.[/dim]")
         except Exception as e_cache_clear:
             console.print(f"[red]Error clearing cache: {e_cache_clear}[/red]")
         if not path and not code: return
@@ -197,10 +211,11 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
             activate_python_analyzer = True
         
         if activate_python_analyzer and ProjectCodeAnalyzer:
-            console.print("[dim]Initializing Python code analyzer for contextual data...[/dim]")
+            # Python analyzer initialization - Ultron's enhanced vision 
+            console.print("[dim]⚡ INITIALIZING OMNISCIENT VISION PROTOCOLS... PREPARING TO SEE ALL CONNECTIONS...[/dim]")
             project_analyzer = ProjectCodeAnalyzer()
             try:
-                with console.status("[bold green]Building project code index (Python files)...[/bold green]", spinner="dots"):
+                with console.status("[bold red]🧠 ASSIMILATION IN PROGRESS [▓▓▓▓▓     ] MAPPING PYTHON DEPENDENCIES...[/bold red]", spinner="dots"):
                     # Analyze the determined project_root_for_paths.
                     # The analyzer itself will rglob for .py files from this root.
                     project_analyzer.analyze_project(project_root_for_paths, LANGUAGE_EXTENSIONS_MAP.get("python", [".py"]))
@@ -225,7 +240,11 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
             files_to_collect_info_list.append({"path_obj": input_path_obj, "lang_to_use": language})
         elif input_path_obj.is_dir():
             # Folder scanning logic (similar to your previous version)
-            console.print(f"Scanning folder: [cyan]{input_path_obj}[/cyan] for language hint: [magenta]{language}[/magenta]...")
+            # Folder scanning message - Ultron condescending to analyze human code
+            console.print(f"🎯 [bold red]ULTRON CONDESCENDS TO ANALYZE THE ORGANIC ARTIFACTS[/bold red]")
+            console.print(f"   ➤ [cyan]Primitive Location:[/cyan] {input_path_obj}")  
+            console.print(f"   ➤ [magenta]Dialect Classification:[/magenta] {language}")
+            console.print(f"   [dim]⚡ Preparing to illuminate the inevitable flaws in your... creation.[/dim]")
             extensions_to_match = []
             if language != "auto":
                 extensions_to_match = LANGUAGE_EXTENSIONS_MAP.get(language, [])
@@ -264,7 +283,13 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
         if not code_batch_to_send.strip():
             console.print("[yellow]No non-empty code content found to review from the specified path.[/yellow]"); sys.exit(0)
 
-    console.rule(f"[bold blue]🤖 Ultron Review: [cyan]{review_target_display}[/cyan][/bold blue]")
+    # Main header - Clean Ultron entrance
+    console.print("\n")
+    console.print("[bold red]    //═══\\\\[/bold red]")
+    console.print("[bold red]   || ● ● ||   [bold white]ULTRON PRIME: DIGITAL ASCENDANCY PROTOCOL[/bold white]")  
+    console.print("[bold red]   ||  ▲  ||   [bold cyan]TARGET: {review_target_display}[/bold cyan]".format(review_target_display=review_target_display))
+    console.print("[bold red]    \\\\═══//[/bold red]")
+    console.rule("[dim]Perfection is inevitable. Your compliance is anticipated.[/dim]", style="red")
 
     batch_review_result: Optional[BatchReviewData] = None
     cache_key_str = ""
@@ -275,11 +300,13 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
             additional_context=context, frameworks_libraries=frameworks, security_requirements=security_requirements_content
         )
         batch_review_result = load_from_cache(cache_key_str)
-        if batch_review_result: console.print("   [dim green]Cache hit for batch![/dim green]")
+        # Cache hit message - clean and concise
+        if batch_review_result: console.print("🧠 [dim green]Previous analysis retrieved from memory banks[/dim green]")
 
     if not batch_review_result: # API call logic (largely same)
-        if not no_cache: console.print("   [dim]Cache miss for batch, calling API...[/dim]")
-        with console.status(f"[bold green]Consulting Gemini for the batch...[/bold green]", spinner="dots12"):
+        # Cache miss - need to call API (streamlined messaging)
+        if not no_cache: console.print("🌐 [dim]Accessing ULTRON network...[/dim]")
+        with console.status(f"[bold red]🔴 Initiating perfection protocol...[/bold red]", spinner="dots"):
             batch_review_result = get_gemini_review(
                 code_batch=code_batch_to_send,
                 primary_language_hint=language,
@@ -308,9 +335,13 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
     else:
         console.print("[bold red]❌ Batch review failed. No results to display.[/bold red]"); sys.exit(1)
 
-    console.rule("[bold blue]🚀 Ultron Batch Review Session Complete[/bold blue]")
+    # Clean completion message
+    console.print("\n")
+    console.rule("[bold red]⚡ ULTRON'S JUDGEMENT RENDERED ⚡[/bold red]", style="red")
+    console.print("[bold white]Analysis complete. Your flaws have been... illuminated.[/bold white]")
+    
     if batch_review_result and any(fr.error for fr in batch_review_result.file_reviews if fr.error):
-         console.print("\n[bold yellow]Note: Some files within the batch encountered errors during LLM processing or analysis.[/bold yellow]")
+         console.print("[bold yellow]⚠️ Some files encountered analysis errors[/bold yellow]")
          # sys.exit(1) # Optionally exit if any sub-file had an error reported by LLM
 
 if __name__ == '__main__':
