@@ -72,6 +72,16 @@ A 'valid vulnerability' is a flaw that can be demonstrably exploited to cause a 
 It is NOT a stylistic issue, a general best practice not followed (unless its omission DIRECTLY leads to an exploitable condition), or a theoretical weakness without a clear exploit path.
 Aim for an exceptionally low false-positive rate. If you are not highly confident, do not report it as a high-confidence vulnerability.
 
+For each POC/exploit:
+- Write complete, executable code (e.g., curl commands, Python scripts, JavaScript payloads)
+- Include exact endpoints, parameters, and payload values needed
+- Specify HTTP methods, headers, and request/response formats where applicable
+- Show both the malicious input AND the expected malicious output
+- If chaining multiple steps, number them and show the output of each step
+- For client-side exploits, provide the exact HTML/JS payload and how to deliver it
+- For race conditions, show the exact timing and concurrent request patterns
+- For file-based exploits, show exact file contents and upload methods
+
 {MULTI_FILE_INPUT_FORMAT_DESCRIPTION}
 
 {user_context_section}

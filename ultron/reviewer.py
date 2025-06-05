@@ -124,11 +124,36 @@ def get_gemini_review(
             print("Found JSON block in code fence")
         else:
             # If no code block, try to find the first { and last } for a complete JSON object
+            # Use a more robust approach that handles nested braces
+            def find_matching_brace(text: str, start_pos: int) -> int:
+                stack = []
+                for i in range(start_pos, len(text)):
+                    if text[i] == '{':
+                        stack.append(i)
+                    elif text[i] == '}':
+                        if stack:
+                            stack.pop()
+                            if not stack:  # Found matching outer brace
+                                return i
+                return -1
+
             start_idx = raw_json_text.find('{')
-            end_idx = raw_json_text.rfind('}')
-            if start_idx != -1 and end_idx != -1 and end_idx > start_idx:
-                cleaned_json_text = raw_json_text[start_idx:end_idx + 1].strip()
-                print("Found JSON object using brace matching")
+            if start_idx != -1:
+                end_idx = find_matching_brace(raw_json_text, start_idx)
+                if end_idx != -1:
+                    cleaned_json_text = raw_json_text[start_idx:end_idx + 1].strip()
+                    print("Found JSON object using brace matching")
+                else:
+                    # If brace matching fails, try to extract what looks like a valid JSON object
+                    print("Brace matching failed, attempting to fix JSON structure")
+                    # Try to extract the main JSON structure even if it's incomplete
+                    potential_json = raw_json_text[start_idx:]
+                    # Add missing braces if needed
+                    open_braces = potential_json.count('{')
+                    close_braces = potential_json.count('}')
+                    if open_braces > close_braces:
+                        potential_json += '}' * (open_braces - close_braces)
+                    cleaned_json_text = potential_json
             else:
                 # If no JSON structure found, create a structured response
                 print("No JSON structure found, creating fallback response")
@@ -147,13 +172,103 @@ def get_gemini_review(
                 })
 
         try:
-            # Attempt to parse as JSON
+            # Attempt to parse as JSON with error recovery
             try:
+                # First try direct parsing
                 parsed_data = json.loads(cleaned_json_text)
             except json.JSONDecodeError as json_err:
-                print(f"JSON parsing error: {json_err}")
+                print(f"Initial JSON parsing error: {json_err}")
                 print("Failed JSON content:", cleaned_json_text[:200] + "..." if len(cleaned_json_text) > 200 else cleaned_json_text)
-                raise  # Re-raise to be caught by outer try block
+                
+                # Try to fix common JSON issues
+                fixed_json = cleaned_json_text
+
+                def clean_json_response(text: str) -> str:
+                    """
+                    Clean and normalize JSON response from Gemini API.
+                    Handles both string content issues and structural problems.
+                    """
+                    # Track string boundaries and content
+                    result = []
+                    in_string = False
+                    current_string = []
+                    
+                    i = 0
+                    while i < len(text):
+                        char = text[i]
+                        
+                        # Handle string boundaries
+                        if char == '"' and (i == 0 or text[i-1] != '\\'):
+                            if in_string:
+                                # End of string - add accumulated content
+                                result.append('"' + ''.join(current_string) + '"')
+                                current_string = []
+                                in_string = False
+                            else:
+                                # Start of string
+                                in_string = True
+                                result.append('"')
+                        # Handle string content
+                        elif in_string:
+                            if char in '\n\r':
+                                # Replace newlines with \n escape sequence
+                                current_string.append('\\n')
+                            elif char == '\\':
+                                # Handle escape sequences
+                                if i + 1 < len(text):
+                                    next_char = text[i + 1]
+                                    if next_char in '"\\':
+                                        current_string.extend([char, next_char])
+                                        i += 1
+                                    else:
+                                        current_string.append(char)
+                            else:
+                                current_string.append(char)
+                        # Handle structural elements
+                        else:
+                            if char in '{[':
+                                result.append(char)
+                            elif char in '}]':
+                                # Remove trailing comma if present
+                                if result and result[-1].strip().endswith(','):
+                                    result[-1] = result[-1].strip()[:-1]
+                                result.append(char)
+                            elif char == ',':
+                                result.append(char)
+                            elif char not in '\n\r\t ':
+                                result.append(char)
+                        i += 1
+                    
+                    # Handle unclosed string
+                    if in_string:
+                        result.append(''.join(current_string) + '"')
+                    
+                    # Join and normalize structure
+                    json_str = ''.join(result)
+                    
+                    # Ensure proper JSON structure
+                    if not json_str.strip().startswith('{'):
+                        json_str = '{' + json_str
+                    if not json_str.strip().endswith('}'):
+                        json_str = json_str.rstrip(',') + '}'
+                    
+                    return json_str
+
+                # Clean and normalize the JSON
+                fixed_json = clean_json_response(fixed_json)
+                
+                try:
+                    parsed_data = json.loads(fixed_json)
+                    print("Successfully parsed JSON after cleaning")
+                except json.JSONDecodeError as retry_err:
+                    print(f"Failed to parse JSON even after cleaning: {retry_err}")
+                    # Create a minimal valid response with the error and partial content
+                    parsed_data = {
+                        "error": f"Failed to parse response: {retry_err}",
+                        "overallBatchSummary": cleaned_json_text[:500] + "...(truncated)",
+                        "fileReviews": [],
+                        "llmProcessingNotes": "Response parsing failed, but content was preserved in overallBatchSummary"
+                    }
             
             # Ensure the response has the required structure
             if not isinstance(parsed_data, dict):
