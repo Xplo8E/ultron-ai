@@ -30,9 +30,9 @@ except ImportError as e:
 LANGUAGE_DISPLAY_NAMES = SUPPORTED_LANGUAGES
 
 @click.group(context_settings=dict(help_option_names=['-h', '--help']))
-@click.version_option(version=cli_version, prog_name="Ultron Code Reviewer")
+@click.version_option(version=cli_version, prog_name="Ultron AI")
 def cli():
-    """🤖 Ultron Code Reviewer 🤖\nAI-powered code analysis using Google Gemini."""
+    """🤖 Ultron AI Code Reviewer 🤖\nAI-powered code analysis using Google Gemini."""
     if not GEMINI_API_KEY_LOADED:
         console = Console(stderr=True)
         console.print("🚨 [bold red]Error: GEMINI_API_KEY not found or not loaded.[/bold red]")
@@ -136,9 +136,11 @@ def build_code_batch_string_with_context(
 @click.option('--ignore-line-rule', '--ilr', multiple=True, help="Rule to ignore specific lines (e.g., 'path/file.py:10').")
 @click.option('--no-cache', is_flag=True, default=False, help="Disable caching for this run.")
 @click.option('--clear-cache', is_flag=True, default=False, help="Clear the Ultron cache before running.")
+@click.option('--verbose', '-v', is_flag=True, default=False, help="Print detailed debug information about requests and responses.")
+
 def review_code_command(path, code, language, model_key, context, frameworks, sec_reqs,
                         output_format, recursive, exclude,
-                        ignore_file_rule, ignore_line_rule, no_cache, clear_cache):
+                        ignore_file_rule, ignore_line_rule, no_cache, clear_cache, verbose):
     """Analyzes code for issues using a batch approach for folders."""
     console = Console()
 
@@ -279,8 +281,13 @@ def review_code_command(path, code, language, model_key, context, frameworks, se
         if not no_cache: console.print("   [dim]Cache miss for batch, calling API...[/dim]")
         with console.status(f"[bold green]Consulting Gemini for the batch...[/bold green]", spinner="dots12"):
             batch_review_result = get_gemini_review(
-                code_batch=code_batch_to_send, primary_language_hint=language, model_key=model_key,
-                additional_context=context, frameworks_libraries=frameworks, security_requirements=security_requirements_content
+                code_batch=code_batch_to_send,
+                primary_language_hint=language,
+                model_key=model_key,
+                additional_context=context,
+                frameworks_libraries=frameworks,
+                security_requirements=security_requirements_content,
+                verbose=verbose
             )
         if batch_review_result and not batch_review_result.error and not no_cache and cache_key_str:
             save_to_cache(cache_key_str, batch_review_result)

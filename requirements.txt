@@ -1,5 +1,6 @@
-google-generativeai
+google-genai
 python-dotenv
 click
 rich
 pydantic
+demjson3

@@ -4,7 +4,8 @@ import json
 import re
 from typing import Optional
 
-import google.generativeai as genai
+from google import genai
+from google.genai import types
 from dotenv import load_dotenv
 
 from .models import BatchReviewData # Changed from ReviewData
@@ -18,7 +19,104 @@ load_dotenv()
 GEMINI_API_KEY_LOADED = os.getenv("GEMINI_API_KEY")
 
 if GEMINI_API_KEY_LOADED:
-    genai.configure(api_key=GEMINI_API_KEY_LOADED)
+    genai_client = genai.Client(api_key=GEMINI_API_KEY_LOADED)
+else:
+    genai_client = None
+
+def clean_json_response(text: str) -> str:
+    """
+    Clean and normalize JSON response from Gemini API.
+    Handles both string content issues and structural problems including truncated responses.
+    """
+    # Handle the case where the response is truncated
+    text = text.strip()
+    
+    # If the text doesn't start with '{', add it
+    if not text.startswith('{'):
+        text = '{' + text
+    
+    # Handle the specific case where we have an unterminated string at the end
+    # Look for patterns like '"fieldName": "' at the end
+    if re.search(r'"\s*:\s*"$', text):
+        # This is an unterminated string field, close it with empty value
+        text += '""'
+    elif text.endswith('"'):
+        # Check if this is the start of a field value that was cut off
+        last_colon = text.rfind(':')
+        if last_colon > 0:
+            before_colon = text[last_colon-20:last_colon] if last_colon > 20 else text[:last_colon]
+            if '"' in before_colon and text[last_colon:].strip().startswith(': "'):
+                # This looks like a truncated string value, close it
+                text += '"'
+    
+    # Find the last properly closed structure to handle major truncation
+    brace_count = 0
+    bracket_count = 0
+    in_string = False
+    escape_next = False
+    last_valid_pos = -1
+    last_complete_field = -1
+    
+    for i, char in enumerate(text):
+        if escape_next:
+            escape_next = False
+            continue
+            
+        if char == '\\':
+            escape_next = True
+            continue
+            
+        if char == '"' and not escape_next:
+            in_string = not in_string
+            continue
+            
+        if not in_string:
+            if char == '{':
+                brace_count += 1
+            elif char == '}':
+                brace_count -= 1
+                if brace_count == 0:
+                    last_valid_pos = i
+            elif char == '[':
+                bracket_count += 1
+            elif char == ']':
+                bracket_count -= 1
+            elif char == ',' and brace_count == 1:  # Top-level comma
+                last_complete_field = i
+    
+    # If we're in an unterminated string and have a last complete field, truncate there
+    if in_string and last_complete_field > 0:
+        text = text[:last_complete_field]
+        in_string = False  # Reset since we truncated
+    
+    # If we found a valid closing position, use it
+    if last_valid_pos > 0:
+        text = text[:last_valid_pos + 1]
+    else:
+        # Ensure proper closing for truncated responses
+        open_braces = text.count('{') - text.count('}')
+        open_brackets = text.count('[') - text.count(']')
+        
+        # If we're still in a string, close it
+        if in_string:
+            text += '"'
+        
+        # Close any open structures
+        if open_brackets > 0:
+            text += ']' * open_brackets
+        if open_braces > 0:
+            text += '}' * open_braces
+    
+    # Clean up common formatting issues
+    text = re.sub(r',\s*,', ',', text)  # Remove duplicate commas
+    text = re.sub(r',\s*}', '}', text)  # Remove trailing commas before }
+    text = re.sub(r',\s*]', ']', text)  # Remove trailing commas before ]
+    
+    # Fix incomplete field assignments
+    text = re.sub(r'"\s*:\s*$', '": ""', text)  # Field with no value
+    text = re.sub(r'"\s*:\s*"[^"]*$', lambda m: m.group(0) + '"', text)  # Unterminated string value
+    
+    return text
 
 def get_gemini_review(
     code_batch: str, # This is now the concatenated string of multiple files
@@ -27,11 +125,15 @@ def get_gemini_review(
     additional_context: Optional[str] = None,
     frameworks_libraries: Optional[str] = None,
     security_requirements: Optional[str] = None,
+    verbose: bool = False,
 ) -> Optional[BatchReviewData]:
     """
     Sends a batch of code files (formatted as a single string) to the Gemini API for review.
+    
+    Args:
+        verbose: If True, prints detailed debug information about the request and response
     """
-    if not GEMINI_API_KEY_LOADED:
+    if not genai_client:
         return BatchReviewData(error="GEMINI_API_KEY not configured.")
 
     user_context_section_str = USER_CONTEXT_TEMPLATE.format(additional_context=additional_context) \
@@ -54,45 +156,51 @@ def get_gemini_review(
         code_batch_to_review=code_batch
     )
 
+    if verbose:
+        print("\n=== REQUEST DETAILS ===")
+        print(f"Model: {AVAILABLE_MODELS.get(model_key, AVAILABLE_MODELS[DEFAULT_MODEL_KEY])}")
+        print("\n=== PROMPT SENT TO MODEL ===")
+        print(prompt)
+        print("\n=== END PROMPT ===")
+
     actual_model_name = AVAILABLE_MODELS.get(model_key, AVAILABLE_MODELS[DEFAULT_MODEL_KEY])
     print(f"Using Gemini model: {actual_model_name} for the batch.")
 
-    model_instance = genai.GenerativeModel(
-        actual_model_name,
-        generation_config={
-            "response_mime_type": "application/json",
-            "temperature": 0.1,
-            "top_k": 20,
-            "top_p": 0.8,
-        },
-        safety_settings=[
-            {
-                "category": "HARM_CATEGORY_DANGEROUS",
-                "threshold": "BLOCK_NONE"
-            }
-        ]
-    )
-
     total_input_tokens_count = 0
     try:
-        total_input_tokens_count = model_instance.count_tokens(prompt).total_tokens
+        token_response = genai_client.models.count_tokens(
+            model=actual_model_name,
+            contents=prompt
+        )
+        total_input_tokens_count = token_response.total_tokens
         print(f"Total estimated tokens for this batch request: {total_input_tokens_count}")
     except Exception as e:
         print(f"Warning: Could not count total tokens for batch - {e}")
 
     try:
         print("Sending batch request to Gemini API...")
-        response = model_instance.generate_content(
-            prompt,
-            generation_config={
-                "response_mime_type": "application/json",
-                "temperature": 0.1,
-                "top_k": 20,
-                "top_p": 0.8,
-                "candidate_count": 1,
-                "stop_sequences": ["```"],  # Prevent code block formatting
-            }
+        response = genai_client.models.generate_content(
+            model=actual_model_name,
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json",
+                temperature=0.1,
+                top_k=20,
+                top_p=0.8,
+                candidate_count=1,
+                max_output_tokens=8192,  # Increase token limit to prevent truncation
+                # Removed stop_sequences to prevent premature termination
+            )
         )
+
+        if verbose:
+            print("\n=== RAW RESPONSE FROM SERVER ===")
+            print("Response object type:", type(response))
+            print("Response object attributes:", dir(response))
+            print("Response object dict:", vars(response))
+            if hasattr(response, '_raw_response'):
+                print("\nRaw response data:", response._raw_response)
+            print("=== END RAW RESPONSE FROM SERVER ===\n")
 
         if not response.candidates:
             error_message = "No content generated by API for the batch."
@@ -102,10 +210,18 @@ def get_gemini_review(
                     error_message += f" Safety Ratings: {response.prompt_feedback.safety_ratings}"
             return BatchReviewData(error=error_message)
 
-        raw_json_text = response.text.strip()
-        
-        # Handle empty response
-        if not raw_json_text:
+        # Get the complete text from the first candidate's parts
+        raw_json_text = ""
+        if response.candidates and response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts:
+                if part.text:
+                    raw_json_text += part.text
+
+        if verbose:
+            print(f"\nExtracted complete JSON text (length: {len(raw_json_text)}):")
+            print(raw_json_text)
+
+        if not raw_json_text.strip():
             return BatchReviewData(
                 error="Empty response from API",
                 overall_batch_summary="Error: Empty response received",
@@ -113,197 +229,45 @@ def get_gemini_review(
                 llm_processing_notes="API returned empty response"
             )
 
-        # Debug logging
-        print(f"Raw response length: {len(raw_json_text)} characters")
-        print("Response starts with:", raw_json_text[:100] + "..." if len(raw_json_text) > 100 else raw_json_text)
-        
-        # First try to find JSON block with or without language identifier
-        match = re.search(r"```(?:json)?\s*(.*?)\s*```", raw_json_text, re.DOTALL | re.IGNORECASE)
-        if match:
-            cleaned_json_text = match.group(1).strip()
-            print("Found JSON block in code fence")
-        else:
-            # If no code block, try to find the first { and last } for a complete JSON object
-            # Use a more robust approach that handles nested braces
-            def find_matching_brace(text: str, start_pos: int) -> int:
-                stack = []
-                for i in range(start_pos, len(text)):
-                    if text[i] == '{':
-                        stack.append(i)
-                    elif text[i] == '}':
-                        if stack:
-                            stack.pop()
-                            if not stack:  # Found matching outer brace
-                                return i
-                return -1
-
-            start_idx = raw_json_text.find('{')
-            if start_idx != -1:
-                end_idx = find_matching_brace(raw_json_text, start_idx)
-                if end_idx != -1:
-                    cleaned_json_text = raw_json_text[start_idx:end_idx + 1].strip()
-                    print("Found JSON object using brace matching")
-                else:
-                    # If brace matching fails, try to extract what looks like a valid JSON object
-                    print("Brace matching failed, attempting to fix JSON structure")
-                    # Try to extract the main JSON structure even if it's incomplete
-                    potential_json = raw_json_text[start_idx:]
-                    # Add missing braces if needed
-                    open_braces = potential_json.count('{')
-                    close_braces = potential_json.count('}')
-                    if open_braces > close_braces:
-                        potential_json += '}' * (open_braces - close_braces)
-                    cleaned_json_text = potential_json
-            else:
-                # If no JSON structure found, create a structured response
-                print("No JSON structure found, creating fallback response")
-                cleaned_json_text = json.dumps({
-                    "error": None,
-                    "overallBatchSummary": "Warning: Response was not in JSON format",
-                    "fileReviews": [{
-                        "filePath": "response.txt",
-                        "summary": "Raw response (not JSON)",
-                        "highConfidenceVulnerabilities": [],
-                        "lowPrioritySuggestions": [],
-                        "error": None,
-                        "languageDetected": None
-                    }],
-                    "llmProcessingNotes": raw_json_text  # Store the raw response here
-                })
-
         try:
-            # Attempt to parse as JSON with error recovery
+            # Direct JSON parsing attempt
+            parsed_data = json.loads(raw_json_text)
+            if verbose:
+                print("\nSuccessfully parsed JSON response")
+            return BatchReviewData(**parsed_data)
+        except json.JSONDecodeError as json_err:
+            if verbose:
+                print(f"\nJSON parsing error: {json_err}")
+                print("Attempting to clean and fix JSON...")
+
+            # Clean the JSON text
+            cleaned_json = clean_json_response(raw_json_text)
+            
+            if verbose:
+                print(f"Cleaned JSON (length: {len(cleaned_json)}):")
+                print(cleaned_json[:500] + "..." if len(cleaned_json) > 500 else cleaned_json)
+            
             try:
-                # First try direct parsing
-                parsed_data = json.loads(cleaned_json_text)
-            except json.JSONDecodeError as json_err:
-                print(f"Initial JSON parsing error: {json_err}")
-                print("Failed JSON content:", cleaned_json_text[:200] + "..." if len(cleaned_json_text) > 200 else cleaned_json_text)
+                parsed_data = json.loads(cleaned_json)
+                if verbose:
+                    print("Successfully parsed cleaned JSON")
+                return BatchReviewData(**parsed_data)
+            except json.JSONDecodeError as e:
+                if verbose:
+                    print(f"Failed to parse even after cleaning: {str(e)}")
                 
-                # Try to fix common JSON issues
-                fixed_json = cleaned_json_text
-
-                def clean_json_response(text: str) -> str:
-                    """
-                    Clean and normalize JSON response from Gemini API.
-                    Handles both string content issues and structural problems.
-                    """
-                    # Track string boundaries and content
-                    result = []
-                    in_string = False
-                    current_string = []
-                    
-                    i = 0
-                    while i < len(text):
-                        char = text[i]
-                        
-                        # Handle string boundaries
-                        if char == '"' and (i == 0 or text[i-1] != '\\'):
-                            if in_string:
-                                # End of string - add accumulated content
-                                result.append('"' + ''.join(current_string) + '"')
-                                current_string = []
-                                in_string = False
-                            else:
-                                # Start of string
-                                in_string = True
-                                result.append('"')
-                        # Handle string content
-                        elif in_string:
-                            if char in '\n\r':
-                                # Replace newlines with \n escape sequence
-                                current_string.append('\\n')
-                            elif char == '\\':
-                                # Handle escape sequences
-                                if i + 1 < len(text):
-                                    next_char = text[i + 1]
-                                    if next_char in '"\\':
-                                        current_string.extend([char, next_char])
-                                        i += 1
-                                    else:
-                                        current_string.append(char)
-                            else:
-                                current_string.append(char)
-                        # Handle structural elements
-                        else:
-                            if char in '{[':
-                                result.append(char)
-                            elif char in '}]':
-                                # Remove trailing comma if present
-                                if result and result[-1].strip().endswith(','):
-                                    result[-1] = result[-1].strip()[:-1]
-                                result.append(char)
-                            elif char == ',':
-                                result.append(char)
-                            elif char not in '\n\r\t ':
-                                result.append(char)
-                        i += 1
-                    
-                    # Handle unclosed string
-                    if in_string:
-                        result.append(''.join(current_string) + '"')
-                    
-                    # Join and normalize structure
-                    json_str = ''.join(result)
-                    
-                    # Ensure proper JSON structure
-                    if not json_str.strip().startswith('{'):
-                        json_str = '{' + json_str
-                    if not json_str.strip().endswith('}'):
-                        json_str = json_str.rstrip(',') + '}'
-                    
-                    return json_str
-
-                # Clean and normalize the JSON
-                fixed_json = clean_json_response(fixed_json)
-                
-                try:
-                    parsed_data = json.loads(fixed_json)
-                    print("Successfully parsed JSON after cleaning")
-                except json.JSONDecodeError as retry_err:
-                    print(f"Failed to parse JSON even after cleaning: {retry_err}")
-                    # Create a minimal valid response with the error and partial content
-                    parsed_data = {
-                        "error": f"Failed to parse response: {retry_err}",
-                        "overallBatchSummary": cleaned_json_text[:500] + "...(truncated)",
-                        "fileReviews": [],
-                        "llmProcessingNotes": "Response parsing failed, but content was preserved in overallBatchSummary"
-                    }
-            
-            # Ensure the response has the required structure
-            if not isinstance(parsed_data, dict):
-                parsed_data = {
-                    "error": None,
-                    "overallBatchSummary": "Warning: Response was not a JSON object",
-                    "fileReviews": [{
-                        "filePath": "response.txt",
-                        "summary": "Raw response (not proper JSON object)",
-                        "highConfidenceVulnerabilities": [],
-                        "lowPrioritySuggestions": [],
-                        "error": None,
-                        "languageDetected": None
-                    }],
-                    "llmProcessingNotes": cleaned_json_text
+                # Last resort: Create a minimal valid response with error info
+                fallback_response = {
+                    "overallBatchSummary": "Response parsing failed due to truncated or malformed JSON",
+                    "fileReviews": [],
+                    "llmProcessingNotes": f"JSON parsing error: {str(e)}. Original error: {str(json_err)}",
+                    "error": f"Failed to parse response: {str(e)}"
                 }
-            
-            # Ensure required fields exist
-            if "fileReviews" not in parsed_data:
-                parsed_data["fileReviews"] = []
-            if "overallBatchSummary" not in parsed_data:
-                parsed_data["overallBatchSummary"] = ""
-            
-            batch_review_obj = BatchReviewData(**parsed_data)
-            batch_review_obj.total_input_tokens = total_input_tokens_count
-            return batch_review_obj
-
-        except Exception as e:
-            print(f"Error processing response: {e}")
-            return BatchReviewData(
-                error=f"Error processing response: {e}",
-                overall_batch_summary="Error processing LLM response",
-                file_reviews=[],
-                llm_processing_notes=cleaned_json_text
-            )
+                
+                if verbose:
+                    print("Returning fallback response due to parsing failures")
+                
+                return BatchReviewData(**fallback_response)
 
     except Exception as e:
         err_msg = f"Gemini API call error for batch: {e}"
