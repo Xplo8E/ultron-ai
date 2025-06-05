@@ -1,10 +1,14 @@
 # src/ultron/constants.py
 
 AVAILABLE_MODELS = {
-    "flash": "gemini-2.0-flash",
-    "pro": "gemini-2.0-pro",
+    "2.0-flash": "gemini-2.0-flash",
+    "2.0-pro": "gemini-2.0-pro",
+    "2.0-flash-lite": "gemini-2.0-flash-lite",
+    "2.5-flash-05-20":"gemini-2.5-flash-preview-05-20",
+    "2.5-flash-04-17":"gemini-2.5-flash-preview-04-17"
 }
-DEFAULT_MODEL_KEY = "flash"
+
+DEFAULT_MODEL_KEY = "2.0-flash"
 
 SUPPORTED_LANGUAGES = {
     "python": "Python", "javascript": "JavaScript", "java": "Java",
