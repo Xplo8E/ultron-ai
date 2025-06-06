@@ -1,4 +1,4 @@
 # src/ultron/__init__.py
 # This file makes 'ultron' a Python package.
 
-__version__ = "0.1.0"
+__version__ = "0.1.1"

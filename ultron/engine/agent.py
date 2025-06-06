@@ -6,7 +6,7 @@ import re
 from typing import List, Dict, Optional
 
 from google import genai
-from google.generativeai import protos, types
+from google.genai import types
 from rich.console import Console
 from rich.markdown import Markdown
 
@@ -72,25 +72,25 @@ class DeepDiveAgent:
             return func_def.get_context_summary()
         return f"Error: Function '{qualified_function_name}' not found in the project index. Try searching for a substring."
 
-    def _define_tools(self) -> List[protos.Tool]:
+    def _define_tools(self) -> List[types.Tool]:
         """Defines the function calling tools for the Gemini API."""
         return [
-            protos.Tool(
+            types.Tool(
                 function_declarations=[
-                    protos.FunctionDeclaration(
+                    types.FunctionDeclaration(
                         name='read_file_content',
                         description="Reads the full content of a specific file from the project.",
-                        parameters=protos.Schema(type=protos.Type.OBJECT, properties={'file_path': protos.Schema(type=protos.Type.STRING)})
+                        parameters=types.Schema(type=types.Type.OBJECT, properties={'file_path': types.Schema(type=types.Type.STRING)})
                     ),
-                    protos.FunctionDeclaration(
+                    types.FunctionDeclaration(
                         name='find_string_in_project',
                         description="Searches for a string or keyword across all files to find relationships.",
-                        parameters=protos.Schema(type=protos.Type.OBJECT, properties={'search_term': protos.Schema(type=protos.Type.STRING)})
+                        parameters=types.Schema(type=types.Type.OBJECT, properties={'search_term': types.Schema(type=types.Type.STRING)})
                     ),
-                    protos.FunctionDeclaration(
+                    types.FunctionDeclaration(
                         name='get_function_definition',
                         description="Gets the source code snippet, signature, and docstring for a fully-qualified function name from the code index.",
-                        parameters=protos.Schema(type=protos.Type.OBJECT, properties={'qualified_function_name': protos.Schema(type=protos.Type.STRING)})
+                        parameters=types.Schema(type=types.Type.OBJECT, properties={'qualified_function_name': types.Schema(type=types.Type.STRING)})
                     )
                 ]
             )
@@ -161,7 +161,7 @@ class DeepDiveAgent:
                         role="tool",
                         parts=[
                             types.Part(
-                                function_response=protos.FunctionResponse(
+                                function_response=types.FunctionResponse(
                                     name=tool_name, response={'result': tool_result}
                                 )
                             )
