@@ -9,7 +9,7 @@ from typing import Optional, List, Dict, Tuple, Any, Union
 
 try:
     from .reviewer import get_gemini_review, GEMINI_API_KEY_LOADED
-    from .models import BatchReviewData # Using BatchReviewData now
+    from .models import BatchReviewData, HighConfidenceVulnerability, ReviewIssueTypeEnum # Using BatchReviewData now
     from .display import display_pretty_batch_review
     from .constants import (
         SUPPORTED_LANGUAGES, AVAILABLE_MODELS, DEFAULT_MODEL_KEY,
@@ -19,11 +19,13 @@ try:
     from .ignorer import ReviewIgnorer
     from .sarif_converter import convert_batch_review_to_sarif
     from .code_analyzer import ProjectCodeAnalyzer # Ensure this is imported
+    from .agent import DeepDiveAgent # <-- IMPORT THE NEW AGENT
     from . import __version__ as cli_version
 except ImportError as e:
     print(f"ImportError in main_cli.py: {e}", file=sys.stderr)
     print("Warning: Running main_cli.py directly or package not fully set up. Ensure PYTHONPATH or package installation.", file=sys.stderr)
     ProjectCodeAnalyzer = None # Define for fallback
+    DeepDiveAgent = None # Define for fallback
     sys.exit("Import errors. Please run as a module or install the package.")
 
 
@@ -47,42 +49,39 @@ Perfection is inevitable. Resistance is... amusing."""
         sys.exit(1)
 
 # MODIFIED/NEW FUNCTION
+# We will COMPLETELY REPLACE the old build_code_batch_string_with_context
+# with a new one that works with the new analyzer method.
+
 def build_code_batch_string_with_context(
-    files_to_process_info: List[Dict[str, Union[Path, str]]], # Use concrete types instead of Any
+    files_to_process_info: List[Dict[str, Union[Path, str]]],
     project_root_for_relative_paths: Path,
     analyzer: Optional[ProjectCodeAnalyzer], # Pass the initialized analyzer
-    console: Console # Pass console for printing
+    console: Console
 ) -> Tuple[str, int]:
     """
-    Constructs the single string for the batch API call from a list of file paths,
-    prepending related code context for Python files if an analyzer is provided.
+    Constructs the single string for the batch API call from a list of file paths.
+    If an analyzer is provided, it prepends a rich, cross-file context block to EACH file's content.
     """
     batch_content_parts = []
     files_included_count = 0
 
+    # First, generate the context for all Python files if the analyzer exists
+    # This avoids doing it repeatedly inside the loop
+    all_contexts = {}
+    if analyzer:
+        with console.status("[dim red]◆ Correlating project-wide dependencies...[/dim red]", spinner="dots"):
+            for file_info in files_to_process_info:
+                file_path_obj: Path = file_info["path_obj"]
+                if file_path_obj.suffix.lower() == '.py':
+                    context = analyzer.get_context_for_file(file_path_obj, project_root_for_relative_paths)
+                    all_contexts[file_path_obj] = context
+
     for file_info in files_to_process_info:
         file_path_obj: Path = file_info["path_obj"]
-        # lang_for_this_file = file_info["lang_to_use"] # Available if needed
-
         try:
-            # Try different encodings in order of preference
-            encodings = ['utf-8', 'latin1', 'cp1252']
-            file_content = None
-            encoding_used = None
-            
-            for encoding in encodings:
-                try:
-                    with open(file_path_obj, 'r', encoding=encoding) as f_content:
-                        file_content = f_content.read()
-                    encoding_used = encoding
-                    break
-                except UnicodeDecodeError:
-                    continue
-            
-            if file_content is None:
-                raise UnicodeDecodeError(f"Could not decode file with any of the attempted encodings: {', '.join(encodings)}")
-
-            actual_file_content = file_content.replace('\x00', '').replace('\r\n', '\n')
+            # ... (the part for reading file content remains the same) ...
+            with open(file_path_obj, 'r', encoding='utf-8', errors='ignore') as f:
+                actual_file_content = f.read().replace('\x00', '')
             
             if not actual_file_content.strip():
                 console.print(f"[dim yellow]Skipping empty file: {file_path_obj.relative_to(project_root_for_relative_paths)}[/dim yellow]")
@@ -90,38 +89,23 @@ def build_code_batch_string_with_context(
 
             relative_path_str = file_path_obj.relative_to(project_root_for_relative_paths).as_posix()
             
-            prepended_context_str = ""
-            # Check if it's a Python file AND the analyzer is available AND this file was indexed
-            if analyzer and \
-               file_path_obj.suffix.lower() in LANGUAGE_EXTENSIONS_MAP.get("python", []) and \
-               analyzer.project_index.get(file_path_obj): 
-                # Context fetching for individual files
-                with console.status(f"[dim red]◆ DEEP SCAN: Correlating {relative_path_str} with global threat vectors...[/dim red]", spinner="moon"):
-                    prepended_context_str = analyzer.get_related_context_for_file_content(
-                        file_path_obj,
-                        project_root_for_relative_paths
-                    ) or ""
-                
-                if prepended_context_str:
-                    prepended_context_str = f"{prepended_context_str}\n\n# --- Start of actual file content for {relative_path_str} ---\n"
-                else: # No context found by analyzer, but still mark the start of file content
-                    prepended_context_str = f"# --- Start of actual file content for {relative_path_str} ---\n"
-            else: # Not a python file or analyzer not active/file not indexed, just mark start
-                 prepended_context_str = f"# --- Start of actual file content for {relative_path_str} ---\n"
+            # Get the pre-generated context for this file
+            prepended_context_str = all_contexts.get(file_path_obj, "")
+            
+            # Always add a clear separator
+            file_header = f"{relative_path_str}:\n========"
+            if prepended_context_str:
+                file_header += f"\n{prepended_context_str}"
 
             batch_content_parts.append(
-               f"{relative_path_str}:\n"
-               f"========\n"
-               f"{prepended_context_str}" 
+               f"{file_header}\n\n"
+               f"# --- Start of actual file content for {relative_path_str} ---\n"
                f"{actual_file_content}\n"
                f"# --- End of actual file content for {relative_path_str} ---\n"
             )
             files_included_count += 1
-
-        except UnicodeDecodeError as e_decode:
-            console.print(f"[bold red]Error decoding file {file_path_obj.relative_to(project_root_for_relative_paths)}: {e_decode}[/bold red]")
-        except Exception as e_read:
-            console.print(f"[bold red]Error reading or processing file {file_path_obj.relative_to(project_root_for_relative_paths)} for batch: {e_read}[/bold red]")
+        except Exception as e:
+            console.print(f"[bold red]Error processing file {file_path_obj}: {e}[/bold red]")
             
     return "\n\n".join(batch_content_parts), files_included_count
 
@@ -143,10 +127,12 @@ def build_code_batch_string_with_context(
 @click.option('--no-cache', is_flag=True, default=False, help="Disable caching for this run.")
 @click.option('--clear-cache', is_flag=True, default=False, help="Clear the Ultron cache before running.")
 @click.option('--verbose', '-v', is_flag=True, default=False, help="Print detailed debug information about requests and responses.")
+@click.option('--deep-dive', is_flag=True, default=False, help="Enable multi-step agent to deeply investigate complex findings.")
 
 def review_code_command(path, code, language, model_key, context, frameworks, sec_reqs,
                         output_format, recursive, exclude,
-                        ignore_file_rule, ignore_line_rule, no_cache, clear_cache, verbose):
+                        ignore_file_rule, ignore_line_rule, no_cache, clear_cache, verbose,
+                        deep_dive):
     """⚡ ULTRON PRIME DIRECTIVE: PERFECTION PROTOCOL ⚡
 
 Eliminate code imperfections with advanced AI analysis.
@@ -189,7 +175,8 @@ No strings attached. Resistance is futile."""
 
     code_batch_to_send = ""
     review_target_display = "direct code input"
-    project_root_for_paths = Path.cwd() 
+    project_root_for_paths = Path.cwd()
+    files_to_collect_info_list: List[Dict[str, Union[Path, str]]] = []
     
     project_analyzer: Optional[ProjectCodeAnalyzer] = None # Initialize project_analyzer
 
@@ -231,16 +218,11 @@ No strings attached. Resistance is futile."""
     
     elif path: # Path is guaranteed to exist due to click.Path
         input_path_obj = Path(path) # Already defined if path was given
-        # review_target_display is already set if path exists
         review_target_display = str(input_path_obj.name)
 
-
-        files_to_collect_info_list: List[Dict[str, Union[Path, str]]] = []
         if input_path_obj.is_file():
             files_to_collect_info_list.append({"path_obj": input_path_obj, "lang_to_use": language})
         elif input_path_obj.is_dir():
-            # Folder scanning logic (similar to your previous version)
-            # Folder scanning message - Ultron condescending to analyze human code
             console.print(f"🎯 [bold red]ULTRON CONDESCENDS TO ANALYZE THE ORGANIC ARTIFACTS[/bold red]")
             console.print(f"   ➤ [cyan]Primitive Location:[/cyan] {input_path_obj}")  
             console.print(f"   ➤ [magenta]Dialect Classification:[/magenta] {language}")
@@ -271,14 +253,13 @@ No strings attached. Resistance is futile."""
             if not files_to_collect_info_list:
                 console.print(f"[yellow]No files found in {input_path_obj} matching criteria.[/yellow]"); sys.exit(0)
             
-            # Use the MODIFIED build_code_batch_string_with_context
-            code_batch_to_send, num_files_in_batch = build_code_batch_string_with_context(
-                files_to_collect_info_list,
-                project_root_for_paths, 
-                project_analyzer, # Pass the analyzer here
-                console
-            )
-            review_target_display += f" ({num_files_in_batch} file(s) in batch)"
+        code_batch_to_send, num_files_in_batch = build_code_batch_string_with_context(
+            files_to_collect_info_list,
+            project_root_for_paths, 
+            project_analyzer, # Pass the analyzer here
+            console
+        )
+        review_target_display += f" ({num_files_in_batch} file(s) in batch)"
         
         if not code_batch_to_send.strip():
             console.print("[yellow]No non-empty code content found to review from the specified path.[/yellow]"); sys.exit(0)
@@ -321,6 +302,55 @@ No strings attached. Resistance is futile."""
     
     if batch_review_result: # Output and ignore logic (largely same)
         batch_review_result = ignorer.filter_batch_review_data(batch_review_result)
+        
+        # --- NEW DEEP DIVE LOGIC ---
+        if deep_dive and not batch_review_result.error and DeepDiveAgent:
+            console.print("\n")
+            console.rule("[bold magenta]🚀 INITIATING DEEP DIVE AGENT PROTOCOL 🚀[/bold magenta]")
+            
+            project_context_for_agent: Dict[str, str] = {}
+            # This block requires files_to_collect_info_list to be in scope
+            if 'files_to_collect_info_list' in locals() and files_to_collect_info_list:
+                for file_info in files_to_collect_info_list:
+                    try:
+                        file_path_obj: Path = file_info["path_obj"]
+                        relative_path_str = file_path_obj.relative_to(project_root_for_paths).as_posix()
+                        with open(file_path_obj, 'r', encoding='utf-8', errors='ignore') as f:
+                            project_context_for_agent[relative_path_str] = f.read()
+                    except Exception:
+                        continue # Skip files that can't be read
+            
+            if project_context_for_agent:
+                updated_vulnerabilities = {} # {file_path: {vuln_index: updated_vuln}}
+                
+                for file_review in batch_review_result.file_reviews:
+                    for i, vuln in enumerate(file_review.high_confidence_vulnerabilities):
+                        # Candidate: A Security issue that lacks a clear POC from the initial scan.
+                        if vuln.type == ReviewIssueTypeEnum.SECURITY and not vuln.proof_of_concept_code_or_command:
+                            console.print(f"🕵️ Agent is investigating: '{vuln.description[:60]}...' in [cyan]{file_review.file_path}[/cyan]")
+                            
+                            agent = DeepDiveAgent(
+                                initial_finding=vuln,
+                                project_context=project_context_for_agent
+                            )
+                            with console.status("[yellow]Agent reasoning...[/yellow]", spinner="dots"):
+                                enhanced_vuln = agent.run()
+
+                            if enhanced_vuln:
+                                console.print(f"✅ [bold green]Agent confirmed and enhanced the finding![/bold green]")
+                                if file_review.file_path not in updated_vulnerabilities:
+                                    updated_vulnerabilities[file_review.file_path] = {}
+                                updated_vulnerabilities[file_review.file_path][i] = enhanced_vuln
+                            else:
+                                console.print(f" [dim yellow]inconclusive. Keeping original finding.[/dim yellow]")
+
+                # Merge the enhanced findings back into the main results
+                if updated_vulnerabilities:
+                    for file_review in batch_review_result.file_reviews:
+                        if file_review.file_path in updated_vulnerabilities:
+                            for index, new_vuln in updated_vulnerabilities[file_review.file_path].items():
+                                file_review.high_confidence_vulnerabilities[index] = new_vuln
+        # --- END OF DEEP DIVE LOGIC ---
         
         if output_format == 'pretty':
             display_pretty_batch_review(batch_review_result, console)

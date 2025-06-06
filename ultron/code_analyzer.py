@@ -1,5 +1,6 @@
 # src/ultron/code_analyzer.py
 import ast
+import os
 from pathlib import Path
 from typing import Dict, List, Optional, Any, Set, Tuple
 
@@ -185,11 +186,10 @@ class PythonCodeVisitor(ast.NodeVisitor):
 # --- Project Analyzer ---
 class ProjectCodeAnalyzer:
     def __init__(self):
-        self.project_index: Dict[Path, FileAnalysis] = {} # file_path -> FileAnalysis
-        # For faster lookups of where functions are defined:
-        self.function_locations: Dict[str, List[Tuple[Path, str]]] = {} # fully_qualified_name_guess -> [(file_path, func_name_in_file)]
-                                                                     # e.g. "module.sub.func" -> [(Path('module/sub.py'), 'func')]
-                                                                     # e.g. "local_func" -> [(Path('current.py'), 'local_func')]
+        self.project_index: Dict[Path, FileAnalysis] = {}
+        # We will now create TWO indexes for lookups
+        self.function_definitions: Dict[str, Tuple[Path, FunctionDefinition]] = {} # qname -> (path, def)
+        self.function_callers: Dict[str, List[Tuple[Path, str]]] = {} # qname -> [(calling_file, calling_func)]
 
     def analyze_project(self, project_dir: Path, language_extensions: List[str] = None):
         """Analyzes all relevant files in a project directory."""
@@ -202,8 +202,8 @@ class ProjectCodeAnalyzer:
                 if file_path.is_file():
                     self.analyze_file(file_path)
         
-        self._build_function_locations()
-        print(f"Project analysis complete. Indexed {len(self.project_index)} files.")
+        self._build_indexes()
+        print(f"Project analysis complete. Indexed {len(self.project_index)} files and built call graph.")
 
     def analyze_file(self, file_path: Path):
         """Parses a single Python file and stores its analysis."""
@@ -226,29 +226,49 @@ class ProjectCodeAnalyzer:
         except Exception as e:
             print(f"Error analyzing file {file_path}: {e}")
 
-    def _build_function_locations(self):
-        """Builds a reverse map for quick function definition lookups."""
-        self.function_locations = {}
-        for file_path, file_analysis in self.project_index.items():
-            # Add functions defined in this file
-            for func_name, func_def in file_analysis.functions.items():
-                # Simple local name
-                if func_name not in self.function_locations:
-                    self.function_locations[func_name] = []
-                self.function_locations[func_name].append((file_path, func_name))
+    def _get_qualified_name(self, file_path: Path, func_name: str, project_root: Path) -> str:
+        """Helper to create a consistent fully qualified name for a function."""
+        try:
+            # Create a module-like path from the project root
+            relative_path = file_path.relative_to(project_root)
+            parts = list(relative_path.parts)
+            if parts[-1].endswith('.py'):
+                parts[-1] = parts[-1][:-3] # remove .py
+            if parts[-1] == '__init__':
+                parts.pop()
+            return ".".join(parts) + f".{func_name}"
+        except ValueError:
+            # Fallback if not relative
+            return func_name
 
-                # Attempt to guess a "fully qualified" name based on file path
-                # This is a heuristic and might not match Python's actual import resolution perfectly
-                relative_path_parts = list(file_path.parent.relative_to(Path.cwd()).parts) # Assuming Path.cwd() is project root
-                if file_path.stem != "__init__":
-                    relative_path_parts.append(file_path.stem)
-                
-                if relative_path_parts:
-                    qualified_prefix = ".".join(relative_path_parts)
-                    qualified_name = f"{qualified_prefix}.{func_name}"
-                    if qualified_name not in self.function_locations:
-                        self.function_locations[qualified_name] = []
-                    self.function_locations[qualified_name].append((file_path, func_name))
+    def _build_indexes(self):
+        """Builds maps for fast lookups of function definitions and callers."""
+        self.function_definitions = {}
+        self.function_callers = {}
+        
+        # A bit of a guess for the project root, often the common parent
+        # This part might need to be more robust in a real-world scenario
+        all_paths = list(self.project_index.keys())
+        if not all_paths: return
+        project_root = Path(os.path.commonpath(all_paths))
+
+        # First pass: Populate all function definitions
+        for file_path, analysis in self.project_index.items():
+            for func_name, func_def in analysis.functions.items():
+                qname = self._get_qualified_name(file_path, func_name, project_root)
+                self.function_definitions[qname] = (file_path, func_def)
+
+        # Second pass: Populate the callers index (inverted call graph)
+        for file_path, analysis in self.project_index.items():
+            for func_name, func_def in analysis.functions.items():
+                caller_qname = self._get_qualified_name(file_path, func_name, project_root)
+                for call in func_def.calls:
+                    # This is a simplification; resolving call.full_call_name to a qname is complex.
+                    # For this example, we assume it matches a key in our definitions.
+                    callee_qname = call.full_call_name # Heuristic
+                    if callee_qname not in self.function_callers:
+                        self.function_callers[callee_qname] = []
+                    self.function_callers[callee_qname].append((file_path, caller_qname))
 
 
     def get_related_context_for_function(
@@ -328,38 +348,40 @@ class ProjectCodeAnalyzer:
             
         return "\n".join(context_parts)
 
-    def get_related_context_for_file_content(
-        self,
-        file_path: Path, # The file whose content is being sent
-        project_root_for_batch: Path, # The root directory of the current scan/batch
-        max_total_context_chars = 2000 # Limit total context to avoid huge prompts
-    ) -> Optional[str]:
-        """
-        Gets related context for all functions within a file.
-        This is called when preparing the batch input.
-        """
+    def get_context_for_file(self, file_path: Path, project_root: Path) -> str:
+        """Generates the full context block for a single file to be prepended to the prompt."""
         if file_path not in self.project_index:
-            self.analyze_file(file_path) # Analyze on demand if not already done
-            if file_path not in self.project_index:
-                return None # Still not found or error
+            return ""
 
         file_analysis = self.project_index[file_path]
-        all_related_contexts: List[str] = []
-        current_chars = 0
+        context_parts = [
+            f"# --- Full Project Context for {file_path.relative_to(project_root).as_posix()} ---",
+            "# This file defines the following functions:"
+        ]
 
-        for func_name in file_analysis.functions.keys():
-            # Pass the project_root_for_batch for relative path calculations if needed inside
-            # For now, get_related_context_for_function uses its own logic for paths
-            func_context = self.get_related_context_for_function(file_path, func_name)
-            if func_context:
-                if current_chars + len(func_context) > max_total_context_chars:
-                    all_related_contexts.append("... (further context truncated due to size limit)")
-                    break
-                all_related_contexts.append(func_context)
-                current_chars += len(func_context)
+        # 1. List functions defined in THIS file and who calls them
+        for func_name in sorted(file_analysis.functions.keys()):
+            qname = self._get_qualified_name(file_path, func_name, project_root)
+            context_parts.append(f"#   - Function: `{qname}`")
+            if qname in self.function_callers:
+                callers = self.function_callers[qname]
+                context_parts.append(f"#     - Called By: {[c[1] for c in callers]}")
         
-        if not all_related_contexts:
-            return None
+        context_parts.append("#\n# This file makes calls to the following functions defined elsewhere:")
         
-        header = f"# Related Code Context for file: {file_path.relative_to(project_root_for_batch).as_posix()}\n"
-        return header + "\n\n---\n\n".join(all_related_contexts)
+        # 2. List functions called by THIS file and provide their definition summaries
+        unique_callees_shown = set()
+        for func_def in file_analysis.functions.values():
+            for call in func_def.calls:
+                callee_qname = call.full_call_name # Heuristic
+                if callee_qname in self.function_definitions and callee_qname not in unique_callees_shown:
+                    unique_callees_shown.add(callee_qname)
+                    def_path, def_obj = self.function_definitions[callee_qname]
+                    if def_path != file_path: # Only show context for functions in OTHER files
+                        context_parts.append(f"#   - Function: `{callee_qname}` (defined in {def_path.relative_to(project_root).as_posix()})")
+                        summary = def_obj.get_context_summary()
+                        indented_summary = "      " + summary.replace("\n", "\n      ")
+                        context_parts.append(indented_summary)
+
+        context_parts.append("# --- End of Project Context ---")
+        return "\n".join(context_parts)

@@ -48,6 +48,9 @@ def _display_single_file_review_details(file_review: FileReviewData, console: Co
             if vuln.severity_assessment:
                 sa_str = vuln.severity_assessment.value if isinstance(vuln.severity_assessment, Enum) else str(vuln.severity_assessment)
                 meta_info_parts.append(f"Severity: [bold]{sa_str}[/bold]")
+            # Display the source if it was enhanced by the agent
+            if hasattr(vuln, 'analysis_source') and vuln.analysis_source and "agent" in vuln.analysis_source:
+                meta_info_parts.append(f"Source: [bold magenta]Deep Dive Agent[/bold magenta]")
             if meta_info_parts: 
                 content.append(" | ".join(meta_info_parts) + "\n", style="dim")
             content.append(f"Line: {vuln.line}\n\n", style="bold")

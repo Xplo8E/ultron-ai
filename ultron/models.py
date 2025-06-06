@@ -25,6 +25,7 @@ class HighConfidenceVulnerability(BaseModel):
     proof_of_concept_explanation: Optional[str] = Field(default=None, alias="proofOfConceptExplanation")
     poc_actionability_tags: Optional[List[str]] = Field(default_factory=list, alias="pocActionabilityTags")
     suggestion: Optional[str] = None
+    analysis_source: Optional[str] = Field(default="initial_scan", alias="analysisSource") # NEW FIELD
 
     @field_validator('type', 'confidence_score', 'severity_assessment', mode='before')
     @classmethod
