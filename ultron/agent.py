@@ -3,6 +3,7 @@
 import os
 import json
 from pathlib import Path
+import re
 from typing import List, Dict, Optional, Any
 
 from google import genai
