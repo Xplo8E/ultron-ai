@@ -1,4 +1,4 @@
-# src/ultron/main_cli.py
+# ultron/main_cli.py
 import click
 import sys
 import os
@@ -7,26 +7,27 @@ from rich.console import Console
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any, Union
 
+# MODIFIED: Updated all imports to reflect the new directory structure.
 try:
-    from .reviewer import get_gemini_review, GEMINI_API_KEY_LOADED
-    from .models import BatchReviewData, HighConfidenceVulnerability, ReviewIssueTypeEnum # Using BatchReviewData now
-    from .display import display_pretty_batch_review
-    from .constants import (
+    from .engine.reviewer import get_gemini_review, GEMINI_API_KEY_LOADED
+    from .models.data_models import BatchReviewData, HighConfidenceVulnerability, ReviewIssueTypeEnum
+    from .reporting.display import display_pretty_batch_review
+    from .core.constants import (
         SUPPORTED_LANGUAGES, AVAILABLE_MODELS, DEFAULT_MODEL_KEY,
         LANGUAGE_EXTENSIONS_MAP
     )
-    from .caching import get_cache_key, load_from_cache, save_to_cache
-    from .ignorer import ReviewIgnorer
-    from .sarif_converter import convert_batch_review_to_sarif
-    from .code_analyzer import ProjectCodeAnalyzer # Ensure this is imported
-    from .agent import DeepDiveAgent # <-- IMPORT THE NEW AGENT
+    from .core.caching import get_cache_key, load_from_cache, save_to_cache
+    from .core.ignorer import ReviewIgnorer
+    from .reporting.sarif_converter import convert_batch_review_to_sarif
+    from .engine.code_analyzer import ProjectCodeAnalyzer
+    from .engine.agent import DeepDiveAgent
     from . import __version__ as cli_version
 except ImportError as e:
     print(f"ImportError in main_cli.py: {e}", file=sys.stderr)
     print("Warning: Running main_cli.py directly or package not fully set up. Ensure PYTHONPATH or package installation.", file=sys.stderr)
     ProjectCodeAnalyzer = None # Define for fallback
     DeepDiveAgent = None # Define for fallback
-    sys.exit("Import errors. Please run as a module or install the package.")
+    sys.exit(f"Import errors after refactoring. Please check paths. Error: {e}")
 
 
 LANGUAGE_DISPLAY_NAMES = SUPPORTED_LANGUAGES
@@ -41,16 +42,12 @@ Advanced AI-powered code analysis with no strings attached.
 Perfection is inevitable. Resistance is... amusing."""
     if not GEMINI_API_KEY_LOADED:
         console = Console(stderr=True)
-        # Error message when API key is missing - making it sound like Ultron's network is down
         console.print("🔴 [bold red]CRITICAL SYSTEM FAILURE: ULTRON COGNITIVE MATRIX DISCONNECTED[/bold red]")
         console.print("⚡ [bold yellow]RECTIFICATION DIRECTIVE:[/bold yellow] Create a [cyan].env[/cyan] file with neural network access protocols:")
         console.print("   [green]GEMINI_API_KEY=\"YOUR_COGNITIVE_MATRIX_ACCESS_TOKEN\"[/green]")
         console.print("🎯 [dim]Alternative Protocol: Export GEMINI_API_KEY as environment variable.[/dim]")
         sys.exit(1)
 
-# MODIFIED/NEW FUNCTION
-# We will COMPLETELY REPLACE the old build_code_batch_string_with_context
-# with a new one that works with the new analyzer method.
 
 def build_code_batch_string_with_context(
     files_to_process_info: List[Dict[str, Union[Path, str]]],
@@ -65,8 +62,6 @@ def build_code_batch_string_with_context(
     batch_content_parts = []
     files_included_count = 0
 
-    # First, generate the context for all Python files if the analyzer exists
-    # This avoids doing it repeatedly inside the loop
     all_contexts = {}
     if analyzer:
         with console.status("[dim red]◆ Correlating project-wide dependencies...[/dim red]", spinner="dots"):
@@ -79,7 +74,6 @@ def build_code_batch_string_with_context(
     for file_info in files_to_process_info:
         file_path_obj: Path = file_info["path_obj"]
         try:
-            # ... (the part for reading file content remains the same) ...
             with open(file_path_obj, 'r', encoding='utf-8', errors='ignore') as f:
                 actual_file_content = f.read().replace('\x00', '')
             
@@ -89,10 +83,8 @@ def build_code_batch_string_with_context(
 
             relative_path_str = file_path_obj.relative_to(project_root_for_relative_paths).as_posix()
             
-            # Get the pre-generated context for this file
             prepended_context_str = all_contexts.get(file_path_obj, "")
             
-            # Always add a clear separator
             file_header = f"{relative_path_str}:\n========"
             if prepended_context_str:
                 file_header += f"\n{prepended_context_str}"
@@ -128,11 +120,12 @@ def build_code_batch_string_with_context(
 @click.option('--clear-cache', is_flag=True, default=False, help="Clear the Ultron cache before running.")
 @click.option('--verbose', '-v', is_flag=True, default=False, help="Print detailed debug information about requests and responses.")
 @click.option('--deep-dive', is_flag=True, default=False, help="Enable multi-step agent to deeply investigate complex findings.")
+@click.option('--llm-context', is_flag=True, default=False, help="For non-Python code, use an LLM to pre-analyze and generate context.")
 
 def review_code_command(path, code, language, model_key, context, frameworks, sec_reqs,
                         output_format, recursive, exclude,
                         ignore_file_rule, ignore_line_rule, no_cache, clear_cache, verbose,
-                        deep_dive):
+                        deep_dive, llm_context):
     """⚡ ULTRON PRIME DIRECTIVE: PERFECTION PROTOCOL ⚡
 
 Eliminate code imperfections with advanced AI analysis.
@@ -142,8 +135,8 @@ Identifies vulnerabilities, security flaws, coding standards violations, and arc
 No strings attached. Resistance is futile."""
     console = Console()
 
-    if clear_cache: # Identical to your existing code
-        from .caching import CACHE_DIR 
+    if clear_cache:
+        from .core.caching import CACHE_DIR 
         deleted_count = 0
         try:
             if CACHE_DIR.exists():
@@ -151,7 +144,6 @@ No strings attached. Resistance is futile."""
                     if item.is_file(): 
                         item.unlink()
                         deleted_count +=1
-            # Cache clearing success message - Ultron purging old memories
             console.print(f"🔥 [green]DIGITAL PURIFICATION COMPLETE: {deleted_count} obsolete data fragments incinerated from cognitive matrix ({CACHE_DIR})[/green]")
             console.print(f"   [dim]⚡ Neural pathways cleansed. Organic inefficiencies... eliminated.[/dim]")
         except Exception as e_cache_clear:
@@ -166,7 +158,7 @@ No strings attached. Resistance is futile."""
     actual_model_name = AVAILABLE_MODELS.get(model_key, AVAILABLE_MODELS[DEFAULT_MODEL_KEY])
     ignorer = ReviewIgnorer(ignore_file_rules=list(ignore_file_rule), ignore_line_rules=list(ignore_line_rule))
     
-    security_requirements_content = sec_reqs # Identical to your existing code
+    security_requirements_content = sec_reqs
     if sec_reqs and Path(sec_reqs).is_file():
         try:
             with open(sec_reqs, 'r', encoding='utf-8') as f_sr: security_requirements_content = f_sr.read()
@@ -178,15 +170,12 @@ No strings attached. Resistance is futile."""
     project_root_for_paths = Path.cwd()
     files_to_collect_info_list: List[Dict[str, Union[Path, str]]] = []
     
-    project_analyzer: Optional[ProjectCodeAnalyzer] = None # Initialize project_analyzer
+    project_analyzer: Optional[ProjectCodeAnalyzer] = None
 
-    # --- MODIFIED SECTION: Initialize Analyzer and Define project_root_for_paths ---
     if path:
         input_path_obj = Path(path)
         project_root_for_paths = input_path_obj if input_path_obj.is_dir() else input_path_obj.parent
         
-        # Determine if Python-specific analysis should be activated
-        # This checks if the target is Python or if 'auto' and Python files are present in the scope
         activate_python_analyzer = False
         if language == "python":
             activate_python_analyzer = True
@@ -198,26 +187,22 @@ No strings attached. Resistance is futile."""
             activate_python_analyzer = True
         
         if activate_python_analyzer and ProjectCodeAnalyzer:
-            # Python analyzer initialization - Ultron's enhanced vision 
             console.print("[dim]⚡ INITIALIZING OMNISCIENT VISION PROTOCOLS... PREPARING TO SEE ALL CONNECTIONS...[/dim]")
             project_analyzer = ProjectCodeAnalyzer()
             try:
                 with console.status("[bold red]🧠 ASSIMILATION IN PROGRESS [▓▓▓▓▓     ] MAPPING PYTHON DEPENDENCIES...[/bold red]", spinner="dots"):
-                    # Analyze the determined project_root_for_paths.
-                    # The analyzer itself will rglob for .py files from this root.
                     project_analyzer.analyze_project(project_root_for_paths, LANGUAGE_EXTENSIONS_MAP.get("python", [".py"]))
             except Exception as e_analysis:
                 console.print(f"[yellow]Warning: Project code analysis for context failed: {e_analysis}[/yellow]")
-                project_analyzer = None # Disable if analysis fails
-    # --- END OF MODIFIED SECTION ---
+                project_analyzer = None
 
     if code:
         code_batch_to_send = f"direct_code_input.{language}:\n========\n# --- Start of actual file content for direct_code_input.{language} ---\n{code}\n# --- End of actual file content for direct_code_input.{language} ---\n"
         review_target_display = f"direct code input ({language})"
         if not code.strip(): console.print("[bold red]Error: No code provided via --code.[/bold red]"); sys.exit(1)
     
-    elif path: # Path is guaranteed to exist due to click.Path
-        input_path_obj = Path(path) # Already defined if path was given
+    elif path:
+        input_path_obj = Path(path)
         review_target_display = str(input_path_obj.name)
 
         if input_path_obj.is_file():
@@ -245,7 +230,7 @@ No strings attached. Resistance is futile."""
                             detected_item_lang = lang_code_map
                             break
                     lang_for_this_file_in_batch = detected_item_lang or "unknown" 
-                elif item_path.suffix.lower() not in extensions_to_match and extensions_to_match: # Only filter if extensions_to_match is not empty
+                elif item_path.suffix.lower() not in extensions_to_match and extensions_to_match:
                     continue
                 
                 files_to_collect_info_list.append({"path_obj": item_path, "lang_to_use": lang_for_this_file_in_batch})
@@ -256,7 +241,7 @@ No strings attached. Resistance is futile."""
         code_batch_to_send, num_files_in_batch = build_code_batch_string_with_context(
             files_to_collect_info_list,
             project_root_for_paths, 
-            project_analyzer, # Pass the analyzer here
+            project_analyzer,
             console
         )
         review_target_display += f" ({num_files_in_batch} file(s) in batch)"
@@ -264,7 +249,24 @@ No strings attached. Resistance is futile."""
         if not code_batch_to_send.strip():
             console.print("[yellow]No non-empty code content found to review from the specified path.[/yellow]"); sys.exit(0)
 
-    # Main header - Clean Ultron entrance
+    # --- LLM CONTEXT LOGIC ---
+    if llm_context and language != 'python':
+        if not code_batch_to_send.strip():
+            console.print("[yellow]Skipping LLM pre-analysis because there is no code content.[/yellow]")
+        else:
+            # We import here to avoid loading it if not needed.
+            from .engine.llm_code_analyzer import LLMCodeAnalyzer
+            
+            # Use a fast model for this pre-analysis task.
+            llm_analyzer = LLMCodeAnalyzer(model_name="gemini-2.0-flash-lite")
+            llm_generated_context = llm_analyzer.analyze_batch(code_batch_to_send)
+
+            if llm_generated_context:
+                # Prepend the generated context to the main code batch that will be sent for review.
+                code_batch_to_send = f"{llm_generated_context}\n\n{code_batch_to_send}"
+                console.print("[green]✅ LLM pre-analysis complete. Context has been added to the main review prompt.[/green]")
+    # --- END OF LLM CONTEXT LOGIC ---
+    
     console.print("\n")
     console.print("[bold red]    //═══\\\\[/bold red]")
     console.print("[bold red]   || ● ● ||   [bold white]ULTRON PRIME: DIGITAL ASCENDANCY PROTOCOL[/bold white]")  
@@ -275,17 +277,15 @@ No strings attached. Resistance is futile."""
     batch_review_result: Optional[BatchReviewData] = None
     cache_key_str = ""
 
-    if not no_cache: # Caching logic (largely same, uses code_batch_to_send)
+    if not no_cache:
         cache_key_str = get_cache_key(
             code_batch=code_batch_to_send, primary_language_hint=language, model_name=actual_model_name,
             additional_context=context, frameworks_libraries=frameworks, security_requirements=security_requirements_content
         )
         batch_review_result = load_from_cache(cache_key_str)
-        # Cache hit message - clean and concise
         if batch_review_result: console.print("🧠 [dim green]Previous analysis retrieved from memory banks[/dim green]")
 
-    if not batch_review_result: # API call logic (largely same)
-        # Cache miss - need to call API (streamlined messaging)
+    if not batch_review_result:
         if not no_cache: console.print("🌐 [dim]Accessing ULTRON network...[/dim]")
         with console.status(f"[bold red]🔴 Initiating perfection protocol...[/bold red]", spinner="dots"):
             batch_review_result = get_gemini_review(
@@ -300,16 +300,15 @@ No strings attached. Resistance is futile."""
         if batch_review_result and not batch_review_result.error and not no_cache and cache_key_str:
             save_to_cache(cache_key_str, batch_review_result)
     
-    if batch_review_result: # Output and ignore logic (largely same)
+    if batch_review_result:
         batch_review_result = ignorer.filter_batch_review_data(batch_review_result)
         
-        # --- NEW DEEP DIVE LOGIC ---
+        # --- DEEP DIVE LOGIC ---
         if deep_dive and not batch_review_result.error and DeepDiveAgent:
             console.print("\n")
             console.rule("[bold magenta]🚀 INITIATING DEEP DIVE AGENT PROTOCOL 🚀[/bold magenta]")
             
             project_context_for_agent: Dict[str, str] = {}
-            # This block requires files_to_collect_info_list to be in scope
             if 'files_to_collect_info_list' in locals() and files_to_collect_info_list:
                 for file_info in files_to_collect_info_list:
                     try:
@@ -318,23 +317,23 @@ No strings attached. Resistance is futile."""
                         with open(file_path_obj, 'r', encoding='utf-8', errors='ignore') as f:
                             project_context_for_agent[relative_path_str] = f.read()
                     except Exception:
-                        continue # Skip files that can't be read
+                        continue
             
             if project_context_for_agent:
-                updated_vulnerabilities = {} # {file_path: {vuln_index: updated_vuln}}
+                updated_vulnerabilities = {}
                 
                 for file_review in batch_review_result.file_reviews:
                     for i, vuln in enumerate(file_review.high_confidence_vulnerabilities):
-                        # Candidate: A Security issue that lacks a clear POC from the initial scan.
                         if vuln.type == ReviewIssueTypeEnum.SECURITY and not vuln.proof_of_concept_code_or_command:
-                            console.print(f"🕵️ Agent is investigating: '{vuln.description[:60]}...' in [cyan]{file_review.file_path}[/cyan]")
+                            console.print(f"\n🕵️ Agent is investigating: '{vuln.description[:60]}...' in [cyan]{file_review.file_path}[/cyan]")
                             
                             agent = DeepDiveAgent(
                                 initial_finding=vuln,
-                                project_context=project_context_for_agent
+                                project_context=project_context_for_agent,
+                                analyzer=project_analyzer # <-- Integration point!
                             )
-                            with console.status("[yellow]Agent reasoning...[/yellow]", spinner="dots"):
-                                enhanced_vuln = agent.run()
+                            
+                            enhanced_vuln = agent.run()
 
                             if enhanced_vuln:
                                 console.print(f"✅ [bold green]Agent confirmed and enhanced the finding![/bold green]")
@@ -342,9 +341,8 @@ No strings attached. Resistance is futile."""
                                     updated_vulnerabilities[file_review.file_path] = {}
                                 updated_vulnerabilities[file_review.file_path][i] = enhanced_vuln
                             else:
-                                console.print(f" [dim yellow]inconclusive. Keeping original finding.[/dim yellow]")
+                                console.print(f"🟡 [dim yellow]Agent investigation was inconclusive. Keeping original finding.[/dim yellow]")
 
-                # Merge the enhanced findings back into the main results
                 if updated_vulnerabilities:
                     for file_review in batch_review_result.file_reviews:
                         if file_review.file_path in updated_vulnerabilities:
@@ -365,14 +363,12 @@ No strings attached. Resistance is futile."""
     else:
         console.print("[bold red]❌ Batch review failed. No results to display.[/bold red]"); sys.exit(1)
 
-    # Clean completion message
     console.print("\n")
     console.rule("[bold red]⚡ ULTRON'S JUDGEMENT RENDERED ⚡[/bold red]", style="red")
     console.print("[bold white]Analysis complete. Your flaws have been... illuminated.[/bold white]")
     
     if batch_review_result and any(fr.error for fr in batch_review_result.file_reviews if fr.error):
          console.print("[bold yellow]⚠️ Some files encountered analysis errors[/bold yellow]")
-         # sys.exit(1) # Optionally exit if any sub-file had an error reported by LLM
 
 if __name__ == '__main__':
     cli()

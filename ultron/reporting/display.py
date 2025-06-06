@@ -7,7 +7,8 @@ from rich.padding import Padding
 from rich.syntax import Syntax
 from enum import Enum
 
-from .models import (
+# MODIFIED: Updated import path
+from ..models.data_models import (
     BatchReviewData, FileReviewData, HighConfidenceVulnerability, LowPrioritySuggestion,
     ReviewIssueTypeEnum, ConfidenceScoreEnum, SeverityAssessmentEnum
 )

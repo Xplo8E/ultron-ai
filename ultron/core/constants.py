@@ -36,6 +36,42 @@ frameworks_libraries_list = "{frameworks_libraries_list}"
 language = "{language}" # If language is also used directly in the f-string template
 code_batch_to_review = "{code_batch_to_review}"
 
+# --- NEW PROMPT TEMPLATE FOR LLM-BASED ANALYZER ---
+
+LLM_ANALYZER_PROMPT_TEMPLATE = """
+You are a high-performance, language-agnostic code analysis engine. Your sole purpose is to read a batch of code files and generate a structured summary of function/method definitions and their call sites.
+
+**Your Task:**
+1.  Analyze the provided code batch, which contains multiple files.
+2.  For each file, identify all the function or method definitions.
+3.  For each function/method, identify all the other functions/methods it calls.
+4.  Produce a single, concise text output summarizing your findings.
+
+**Critical Output Format Requirements:**
+-   DO NOT provide any commentary, explanation, or summary.
+-   DO NOT use markdown code blocks (```).
+-   Follow the specified text format EXACTLY.
+-   If a file contains no functions or calls, state that.
+
+**Example Output Format:**
+# === File: src/com/example/app/MainActivity.java ===
+# Defines Methods:
+#   - public void onCreate(Bundle savedInstanceState) (Lines: 15-32)
+#   - class JSBridge.showToast(String toast) (Lines: 9-12)
+# Calls:
+#   - `super.onCreate()` at line 16
+#   - `new WebView()` at line 17
+#   - `getIntent().getStringExtra()` at line 23
+#   - `webView.loadUrl()` at line 31
+
+# === File: AndroidManifest.xml ===
+# This file does not contain function definitions or calls.
+
+
+The code batch to analyze begins now:
+{code_batch_to_analyze}
+"""
+
 
 MULTI_FILE_INPUT_FORMAT_DESCRIPTION = """
 The code to review will be provided in a special format, listing multiple files.

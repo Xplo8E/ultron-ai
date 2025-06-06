@@ -3,7 +3,8 @@ from typing import List, Optional, Set, Tuple, Union
 from pathlib import Path
 from enum import Enum
 
-from .models import BatchReviewData, FileReviewData, HighConfidenceVulnerability, LowPrioritySuggestion
+# MODIFIED: Updated import path
+from ..models.data_models import BatchReviewData, FileReviewData, HighConfidenceVulnerability, LowPrioritySuggestion
 
 class ReviewIgnorer:
     def __init__(self, ignore_file_rules: Optional[List[str]] = None, ignore_line_rules: Optional[List[str]] = None):

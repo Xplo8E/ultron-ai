@@ -3,16 +3,17 @@ from typing import List, Optional, Dict, Union as PyUnion
 from pathlib import Path
 from enum import Enum
 
-from .models import (
+# MODIFIED: Updated import paths
+from ..models.data_models import (
     BatchReviewData, FileReviewData, HighConfidenceVulnerability, LowPrioritySuggestion,
     ReviewIssueTypeEnum, SeverityAssessmentEnum
 )
-from .sarif_models import (
+from ..models.sarif_models import (
     SarifLog, SarifRun, SarifTool, SarifToolComponent, SarifResult,
     SarifReportingDescriptor, SarifLocation, SarifPhysicalLocation,
     SarifArtifactLocation, SarifRegion, SarifVersion
 )
-from . import __version__ as ultron_version
+from .. import __version__ as ultron_version
 
 def _level_from_issue(issue: PyUnion[HighConfidenceVulnerability, LowPrioritySuggestion]) -> str:
     if isinstance(issue, HighConfidenceVulnerability):

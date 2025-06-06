@@ -6,7 +6,8 @@ from pathlib import Path
 from typing import Optional
 import time # For more accurate expiry
 
-from .models import BatchReviewData # Changed to BatchReviewData
+# MODIFIED: Updated import path
+from ..models.data_models import BatchReviewData
 
 CACHE_DIR = Path.home() / ".cache" / "ultron"
 CACHE_DIR.mkdir(parents=True, exist_ok=True)
