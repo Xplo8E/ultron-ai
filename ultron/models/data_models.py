@@ -27,6 +27,7 @@ class HighConfidenceVulnerability(BaseModel):
     suggestion: Optional[str] = None
     # MODIFIED: Added analysis_source to track if the agent enhanced the finding.
     analysis_source: Optional[str] = Field(default="initial_scan", alias="analysisSource")
+    investigation_log: Optional[List[str]] = Field(default=None, alias="investigationLog")
 
     @field_validator('type', 'confidence_score', 'severity_assessment', mode='before')
     @classmethod

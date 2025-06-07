@@ -94,7 +94,21 @@ def _display_single_file_review_details(file_review: FileReviewData, console: Co
                 content.append("🏷️ POC Tags:\n", style="bold yellow")
                 content.append("─" * 50 + "\n", style="dim")
                 content.append(f"[{', '.join(vuln.poc_actionability_tags)}]\n\n", style="italic dim")
-            
+            # Display the agent's thought process if available
+            if hasattr(vuln, 'investigation_log') and vuln.investigation_log:
+                content.append("\n\n")
+                content.append("🧠 AGENT'S THOUGHT PROCESS:\n", style="bold magenta")
+                content.append("─" * 50 + "\n", style="dim")
+                
+                log_markdown = ""
+                for step_log in vuln.investigation_log:
+                    # Use rich's markup for better rendering
+                    step_log = step_log.replace("**Thought:**", "[bold]🤔 Thought:[/bold]")
+                    step_log = step_log.replace("**Action:**", "[bold]🛠️ Action:[/bold]")
+                    step_log = step_log.replace("**Observation:**", "[bold]🔬 Observation:[/bold]")
+                    log_markdown += f"- {step_log}\n"
+                content.append(_render_markdown_to_text(log_markdown, console))
+
             if vuln.suggestion:
                 # Suggestion section - Ultron's directive for improvement
                 content.append("🛠️ RECTIFICATION DIRECTIVE:\n", style="bold yellow")

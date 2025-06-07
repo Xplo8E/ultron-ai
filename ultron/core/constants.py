@@ -1,13 +1,13 @@
 # src/ultron/constants.py
 
 AVAILABLE_MODELS = {
-    "2.0-flash": "gemini-2.0-flash",
-    "2.0-pro": "gemini-2.0-pro",
-    "2.0-flash-lite": "gemini-2.0-flash-lite",
-    "2.5-flash-05-20":"gemini-2.5-flash-preview-05-20",
-    "2.5-flash-04-17":"gemini-2.5-flash-preview-04-17"
+    # Models available on the free tier
+    "2.0-flash-lite": "gemini-2.0-flash-lite",             # For LLM-based context analysis
+    "2.0-flash": "gemini-2.0-flash",                 # Good for the main review
+    "2.5-flash-05-20": "gemini-2.5-flash-preview-05-20"  # Best free model for the agent
 }
 
+# Set the default for the main 'review' command to the best free general-purpose model
 DEFAULT_MODEL_KEY = "2.0-flash"
 
 SUPPORTED_LANGUAGES = {

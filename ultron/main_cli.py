@@ -105,9 +105,9 @@ def build_code_batch_string_with_context(
 @cli.command("review")
 @click.option('--path', '-p', type=click.Path(exists=True, resolve_path=True), help="Path to code file or folder.")
 @click.option('--code', '-c', type=str, help="Direct code string to review (ignores --path).")
-@click.option('--language', '-l', type=click.Choice(list(SUPPORTED_LANGUAGES.keys()), case_sensitive=False), required=True, 
+@click.option('--language', '-l', type=click.Choice(list(SUPPORTED_LANGUAGES.keys()), case_sensitive=False), required=True,  
               help="Primary language hint. For folders with 'auto', Ultron attempts per-file detection.")
-@click.option('--model-key', '-m', type=click.Choice(list(AVAILABLE_MODELS.keys())), default=DEFAULT_MODEL_KEY, show_default=True, help="Gemini model.")
+@click.option('--model-key', '-m', type=click.Choice(list(AVAILABLE_MODELS.keys())), default=DEFAULT_MODEL_KEY, show_default=True, help="Gemini model for standard review.")
 @click.option('--context', '-ctx', default="", help="Additional context for the reviewer.")
 @click.option('--frameworks', '--fw', default="", help="Comma-separated frameworks/libraries (e.g., 'Django,React').")
 @click.option('--sec-reqs', '--sr', default="", help="Path to file or text of security requirements.")
@@ -257,8 +257,7 @@ No strings attached. Resistance is futile."""
             # We import here to avoid loading it if not needed.
             from .engine.llm_code_analyzer import LLMCodeAnalyzer
             
-            # Use a fast model for this pre-analysis task.
-            llm_analyzer = LLMCodeAnalyzer(model_name="gemini-2.0-flash-lite")
+            llm_analyzer = LLMCodeAnalyzer(model_name=AVAILABLE_MODELS["2.0-flash-lite"])
             llm_generated_context = llm_analyzer.analyze_batch(code_batch_to_send)
 
             if llm_generated_context:
@@ -274,37 +273,61 @@ No strings attached. Resistance is futile."""
     console.print("[bold red]    \\\\═══//[/bold red]")
     console.rule("[dim]Perfection is inevitable. Your compliance is anticipated.[/dim]", style="red")
 
+    # =========================================================================
+    # ==================== START: REFACTORED REVIEW LOGIC =====================
+    # =========================================================================
+    
     batch_review_result: Optional[BatchReviewData] = None
+    
+    # First, check if we have a cached result.
+    # The cache key depends on the model, so we determine the model first.
+    review_model_key = model_key
+    if deep_dive:
+        # If doing a deep dive, the *initial* scan is just for triage.
+        # We use the fastest model for triage, and the agent uses the powerful one.
+        # The cache key should be based on the final, powerful model to avoid
+        # caching a cheap triage result as a final answer.
+        # The agent's model is hardcoded, so we can use its key here for caching.
+        review_model_key = "2.5-flash-05-20" 
+        
     cache_key_str = ""
 
     if not no_cache:
         cache_key_str = get_cache_key(
-            code_batch=code_batch_to_send, primary_language_hint=language, model_name=actual_model_name,
-            additional_context=context, frameworks_libraries=frameworks, security_requirements=security_requirements_content
+            code_batch=code_batch_to_send, 
+            primary_language_hint=language, 
+            model_name=AVAILABLE_MODELS.get(review_model_key, ""),
+            additional_context=context, 
+            frameworks_libraries=frameworks, 
+            security_requirements=security_requirements_content
         )
         batch_review_result = load_from_cache(cache_key_str)
         if batch_review_result: console.print("🧠 [dim green]Previous analysis retrieved from memory banks[/dim green]")
 
     if not batch_review_result:
         if not no_cache: console.print("🌐 [dim]Accessing ULTRON network...[/dim]")
+
+        # Decide which model to use for the initial API call
+        initial_model_for_scan = model_key
+        if deep_dive:
+            console.print("⚡ [dim magenta]Deep Dive requested. Using fast model for initial triage...[/dim magenta]")
+            # For deep dive, the first pass should be cheap and fast
+            initial_model_for_scan = "2.0-flash" 
+
         with console.status(f"[bold red]🔴 Initiating perfection protocol...[/bold red]", spinner="dots"):
             batch_review_result = get_gemini_review(
                 code_batch=code_batch_to_send,
                 primary_language_hint=language,
-                model_key=model_key,
+                model_key=initial_model_for_scan, # <-- Use the strategically chosen model
                 additional_context=context,
                 frameworks_libraries=frameworks,
                 security_requirements=security_requirements_content,
                 verbose=verbose
             )
-        if batch_review_result and not batch_review_result.error and not no_cache and cache_key_str:
-            save_to_cache(cache_key_str, batch_review_result)
-    
-    if batch_review_result:
-        batch_review_result = ignorer.filter_batch_review_data(batch_review_result)
-        
+
         # --- DEEP DIVE LOGIC ---
-        if deep_dive and not batch_review_result.error and DeepDiveAgent:
+        # Now, immediately run the agent if requested and the initial scan was successful
+        if deep_dive and batch_review_result and not batch_review_result.error and DeepDiveAgent:
             console.print("\n")
             console.rule("[bold magenta]🚀 INITIATING DEEP DIVE AGENT PROTOCOL 🚀[/bold magenta]")
             
@@ -324,13 +347,14 @@ No strings attached. Resistance is futile."""
                 
                 for file_review in batch_review_result.file_reviews:
                     for i, vuln in enumerate(file_review.high_confidence_vulnerabilities):
+                        # Agent investigates security issues without a POC
                         if vuln.type == ReviewIssueTypeEnum.SECURITY and not vuln.proof_of_concept_code_or_command:
                             console.print(f"\n🕵️ Agent is investigating: '{vuln.description[:60]}...' in [cyan]{file_review.file_path}[/cyan]")
                             
                             agent = DeepDiveAgent(
                                 initial_finding=vuln,
                                 project_context=project_context_for_agent,
-                                analyzer=project_analyzer # <-- Integration point!
+                                analyzer=project_analyzer
                             )
                             
                             enhanced_vuln = agent.run()
@@ -348,7 +372,15 @@ No strings attached. Resistance is futile."""
                         if file_review.file_path in updated_vulnerabilities:
                             for index, new_vuln in updated_vulnerabilities[file_review.file_path].items():
                                 file_review.high_confidence_vulnerabilities[index] = new_vuln
-        # --- END OF DEEP DIVE LOGIC ---
+        
+        # Cache the FINAL result (after any potential deep dive enhancement)
+        if batch_review_result and not batch_review_result.error and not no_cache and cache_key_str:
+            save_to_cache(cache_key_str, batch_review_result)
+
+    # --- PROCESS AND DISPLAY FINAL RESULTS ---
+    if batch_review_result:
+        # Filter the final results for any ignored issues
+        batch_review_result = ignorer.filter_batch_review_data(batch_review_result)
         
         if output_format == 'pretty':
             display_pretty_batch_review(batch_review_result, console)

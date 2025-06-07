@@ -7,7 +7,7 @@ from typing import Optional
 from google import genai
 from rich.console import Console
 
-from ..core.constants import LLM_ANALYZER_PROMPT_TEMPLATE
+from ..core.constants import LLM_ANALYZER_PROMPT_TEMPLATE, AVAILABLE_MODELS
 
 console = Console()
 
@@ -25,8 +25,8 @@ class LLMCodeAnalyzer:
     to generate a summary of functions, methods, and their call relationships.
     This is intended for non-Python code where a traditional AST parser is not used.
     """
-
-    def __init__(self, model_name: str = "gemini-2.0-flash-lite"):
+# use model variable from constants.py, available models are in the constants.py file
+    def __init__(self, model_name: str = AVAILABLE_MODELS["2.0-flash-lite"]):
         if not genai_client:
             raise ValueError("GEMINI_API_KEY not found. The LLM Analyzer cannot be initialized.")
         # We use a smaller, faster model for this pre-analysis task.

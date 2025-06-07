@@ -13,6 +13,7 @@ from rich.markdown import Markdown
 # Corrected relative imports for the new structure
 from ..models.data_models import HighConfidenceVulnerability
 from .code_analyzer import ProjectCodeAnalyzer
+from ..core.constants import AVAILABLE_MODELS
 
 console = Console()
 
@@ -26,7 +27,7 @@ class DeepDiveAgent:
                  initial_finding: HighConfidenceVulnerability,
                  project_context: Dict[str, str],
                  analyzer: Optional[ProjectCodeAnalyzer] = None,
-                 model_name: str = "gemini-2.5-flash-preview-05-20"):
+                 model_name: str = AVAILABLE_MODELS["2.5-flash-05-20"]):
 
         if not os.getenv("GEMINI_API_KEY"):
             raise ValueError("GEMINI_API_KEY not found in environment. The agent cannot be initialized.")
@@ -138,12 +139,13 @@ class DeepDiveAgent:
                 # THOUGHT: The model's reasoning leading to the action.
                 if part.text:
                     console.print(Markdown(f"**🤔 Agent Thought:** {part.text}"))
-
+                    self.investigation_steps.append(f"**Thought:** {part.text}")
                 # ACTION: The model wants to use a tool.
                 function_call = part.function_call
                 tool_name = function_call.name
                 tool_args = {key: value for key, value in function_call.args.items()}
                 console.print(f"**🛠️ Agent Action:** Calling tool `{tool_name}` with args: `{tool_args}`")
+                self.investigation_steps.append(f"**Action:** Calling tool `{tool_name}` with args: `{tool_args}`")
 
                 if tool_name == 'read_file_content':
                     tool_result = self._tool_read_file_content(**tool_args)
@@ -153,6 +155,8 @@ class DeepDiveAgent:
                     tool_result = self._tool_get_function_definition(**tool_args)
                 else:
                     tool_result = f"Error: Unknown tool '{tool_name}'"
+                
+                self.investigation_steps.append(f"**Observation:** Result from `{tool_name}` was returned to the agent.")
 
                 # OBSERVATION: Send the tool's result back to the model.
                 conversation_history.append(types.Content(parts=[part], role='model')) # Append the model's function call request
