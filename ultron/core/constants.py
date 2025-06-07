@@ -44,33 +44,38 @@ code_batch_to_review = "{code_batch_to_review}"
 # --- NEW PROMPT TEMPLATE FOR LLM-BASED ANALYZER ---
 
 LLM_ANALYZER_PROMPT_TEMPLATE = """
-You are a high-performance, language-agnostic code analysis engine. Your sole purpose is to read a batch of code files and generate a structured summary of function/method definitions and their call sites.
+You are a senior software architect. Your task is to analyze a batch of code files and generate a high-level architectural summary. This summary will be prepended to a later, more detailed security review prompt to provide essential context.
 
-**Your Task:**
-1.  Analyze the provided code batch, which contains multiple files.
-2.  For each file, identify all the function or method definitions.
-3.  For each function/method, identify all the other functions/methods it calls.
-4.  Produce a single, concise text output summarizing your findings.
+**Your Goal:**
+For each file in the batch, provide a concise summary that explains:
+1.  **Purpose:** What is the primary role or responsibility of this file? (e.g., "This file defines the main Android Activity," "This is a utility module for database connections," "This XML file configures application permissions and components.")
+2.  **Key Components:** What are the major classes, functions, or components defined in this file?
+3.  **Inter-file Relationships:** How does this file likely interact with other files in the batch? Mention specific function calls, class instantiations, or data flows that connect them. (e.g., "The `MainActivity.java` file reads the `url_to_load` intent and uses it in a WebView, which is configured by `AndroidManifest.xml` to be an exported activity.")
 
 **Critical Output Format Requirements:**
--   DO NOT provide any commentary, explanation, or summary.
+-   Produce a single, concise text block.
+-   Use clear headings for each file.
 -   DO NOT use markdown code blocks (```).
--   Follow the specified text format EXACTLY.
--   If a file contains no functions or calls, state that.
+-   Your summary should be descriptive and focus on the *'why'* and *'how'* of the code, not just a list of function names.
 
 **Example Output Format:**
 # === File: src/com/example/app/MainActivity.java ===
-# Defines Methods:
-#   - public void onCreate(Bundle savedInstanceState) (Lines: 15-32)
-#   - class JSBridge.showToast(String toast) (Lines: 9-12)
-# Calls:
-#   - `super.onCreate()` at line 16
-#   - `new WebView()` at line 17
-#   - `getIntent().getStringExtra()` at line 23
-#   - `webView.loadUrl()` at line 31
+# Purpose: Defines the main entry point activity for the Android application. It is responsible for creating and managing a WebView component.
+# Key Components:
+#   - Class `MainActivity`: The main activity.
+#   - Method `onCreate()`: Initializes the WebView, enables JavaScript, and loads a URL.
+#   - Class `JSBridge`: An inner class exposed to JavaScript, allowing the WebView to communicate with native Java code.
+# Relationships:
+#   - This activity's ability to be launched by other apps is controlled by the `android:exported="true"` attribute in `AndroidManifest.xml`.
+#   - It receives a URL from an `Intent` extra named `url_to_load`, indicating it's designed to be launched with external data.
 
 # === File: AndroidManifest.xml ===
-# This file does not contain function definitions or calls.
+# Purpose: This is the core configuration file for the Android application. It declares permissions, components, and application-level settings.
+# Key Components:
+#   - `<application>`: Defines global app settings like `allowBackup`.
+#   - `<activity>`: Declares the `MainActivity`.
+# Relationships:
+#   - The `android:exported="true"` attribute for `.MainActivity` makes it accessible to other applications on the device, which is a critical piece of context for analyzing `MainActivity.java`.
 
 
 The code batch to analyze begins now:
