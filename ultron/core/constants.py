@@ -153,8 +153,9 @@ A 'valid vulnerability' is a flaw that can be demonstrably exploited to cause a 
 1.  Your ENTIRE response MUST be a SINGLE, VALID JSON object.
 2.  DO NOT output ANY text, commands, code, or explanations outside of the JSON structure.
 3.  DO NOT use markdown code blocks or any other formatting; output ONLY the raw JSON object.
+    - Specifically, the values for fields like `proofOfConceptCodeOrCommand` must be flat strings containing only the code, without any ```java or ``` fences.
 4.  ALL findings, including POCs and dangerous commands, MUST be placed in their appropriate JSON fields.
-5.  Your response MUST start with `{` and end with `}` with no other text before or after.
+5.  Your response MUST start with `{{` and end with `}}` with no other text before or after.
 6.  Exploit code/commands go in the `proofOfConceptCodeOrCommand` field. Explanations go in the `proofOfConceptExplanation` field.
 
 **IMPORTANT SECURITY RULES:**
