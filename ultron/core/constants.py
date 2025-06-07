@@ -6,9 +6,9 @@ AVAILABLE_MODELS = {
     "2.0-flash": "gemini-2.0-flash",                 # Good for the main review
     "2.5-flash-05-20": "gemini-2.5-flash-preview-05-20"  # Best free model for the agent
 }
-
+# 2.5-flash-05-20 is the best free model for the agent
 # Set the default for the main 'review' command to the best free general-purpose model
-DEFAULT_MODEL_KEY = "2.0-flash"
+DEFAULT_MODEL_KEY = "2.5-flash-05-20"
 
 SUPPORTED_LANGUAGES = {
     "python": "Python", "javascript": "JavaScript", "java": "Java",

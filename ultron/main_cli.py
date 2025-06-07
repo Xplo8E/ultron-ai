@@ -283,12 +283,10 @@ No strings attached. Resistance is futile."""
     # The cache key depends on the model, so we determine the model first.
     review_model_key = model_key
     if deep_dive:
-        # If doing a deep dive, the *initial* scan is just for triage.
-        # We use the fastest model for triage, and the agent uses the powerful one.
-        # The cache key should be based on the final, powerful model to avoid
-        # caching a cheap triage result as a final answer.
-        # The agent's model is hardcoded, so we can use its key here for caching.
-        review_model_key = "2.5-flash-05-20" 
+        # For deep dive, the initial scan uses the user's specified model,
+        # and the agent uses 2.0-flash. Cache key should be based on the 
+        # initial scan model since that's the main analysis result.
+        review_model_key = model_key 
         
     cache_key_str = ""
 
@@ -310,9 +308,9 @@ No strings attached. Resistance is futile."""
         # Decide which model to use for the initial API call
         initial_model_for_scan = model_key
         if deep_dive:
-            console.print("⚡ [dim magenta]Deep Dive requested. Using fast model for initial triage...[/dim magenta]")
-            # For deep dive, the first pass should be cheap and fast
-            initial_model_for_scan = "2.0-flash" 
+            console.print("⚡ [dim magenta]Deep Dive requested. Initial scan with specified model, agent will use 2.0-flash...[/dim magenta]")
+            # For deep dive, keep the initial scan with user's model, agent uses 2.0-flash
+            initial_model_for_scan = model_key 
 
         with console.status(f"[bold red]🔴 Initiating perfection protocol...[/bold red]", spinner="dots"):
             batch_review_result = get_gemini_review(

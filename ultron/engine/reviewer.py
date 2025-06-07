@@ -124,12 +124,31 @@ def get_gemini_review(
                 top_p=0.8,
                 candidate_count=1,
                 max_output_tokens=8192,
+                thinking_config=types.GenerationConfigThinkingConfig(
+                    include_thoughts=True,
+                    thinking_budget=1024,
+                )
             )
         )
+
+        """
+        to print thoughts use this 
+        for part in response.candidates[0].content.parts:
+    if part and part.thought:  # show thoughts
+        print(part.text)
+
+        # Token count for `Thinking`
+print(response.usage_metadata.thoughts_token_count)
+        """
 
         if verbose:
             print("\n=== RAW RESPONSE FROM SERVER ===")
             print(f"Response object type: {type(response)}")
+            print(f"Token count for `Thinking`: {response.usage_metadata.thoughts_token_count}")
+            print(f"Model thoughts:")
+            for part in response.candidates[0].content.parts:
+                if part and part.thought:  # show thoughts
+                    print(part.text)
             print(f"Response object dict: {vars(response)}")
             print("=== END RAW RESPONSE FROM SERVER ===\n")
 

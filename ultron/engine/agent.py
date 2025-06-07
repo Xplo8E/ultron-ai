@@ -27,7 +27,7 @@ class DeepDiveAgent:
                  initial_finding: HighConfidenceVulnerability,
                  project_context: Dict[str, str],
                  analyzer: Optional[ProjectCodeAnalyzer] = None,
-                 model_name: str = AVAILABLE_MODELS["2.5-flash-05-20"]):
+                 model_name: str = AVAILABLE_MODELS["2.0-flash"]):
 
         if not os.getenv("GEMINI_API_KEY"):
             raise ValueError("GEMINI_API_KEY not found in environment. The agent cannot be initialized.")
