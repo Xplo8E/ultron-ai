@@ -2,7 +2,7 @@
 import os
 import json
 import re
-from typing import Optional
+from typing import Optional, List # MODIFIED: Added List
 
 from google import genai
 from google.genai import types
@@ -126,30 +126,46 @@ def get_gemini_review(
                 max_output_tokens=8192,
                 thinking_config=types.GenerationConfigThinkingConfig(
                     include_thoughts=True,
-                    thinking_budget=1024,
+                    # MODIFIED: Increased budget slightly to ensure we capture enough thought process
+                    thinking_budget=2048,
                 )
             )
         )
-
-        """
-        to print thoughts use this 
-        for part in response.candidates[0].content.parts:
-    if part and part.thought:  # show thoughts
-        print(part.text)
-
-        # Token count for `Thinking`
-print(response.usage_metadata.thoughts_token_count)
-        """
+        
+        # ==================== NEW LOGIC TO SEPARATE THOUGHTS AND PAYLOAD ====================
+        
+        thought_parts: List[str] = []
+        payload_parts: List[str] = []
+        
+        if response.candidates and response.candidates[0].content.parts:
+            for part in response.candidates[0].content.parts:
+                if part.thought:
+                    # This is part of the model's thought process
+                    if part.text:
+                        thought_parts.append(part.text)
+                else:
+                    # This is part of the final JSON payload
+                    if part.text:
+                        payload_parts.append(part.text)
+                        
+        # Combine the collected parts into final strings
+        full_thoughts_text = "".join(thought_parts)
+        raw_json_text = "".join(payload_parts)
+        
+        # =================================================================================
 
         if verbose:
             print("\n=== RAW RESPONSE FROM SERVER ===")
             print(f"Response object type: {type(response)}")
             print(f"Token count for `Thinking`: {response.usage_metadata.thoughts_token_count}")
-            print(f"Model thoughts:")
-            for part in response.candidates[0].content.parts:
-                if part and part.thought:  # show thoughts
-                    print(part.text)
-            print(f"Response object dict: {vars(response)}")
+            # MODIFIED: Print the separated thoughts cleanly
+            print("Model thoughts:")
+            if full_thoughts_text:
+                print(full_thoughts_text)
+            else:
+                print("No thoughts were returned.")
+            # MODIFIED: Keep the full response dict for deep debugging if needed
+            print(f"\nResponse object dict: {vars(response)}")
             print("=== END RAW RESPONSE FROM SERVER ===\n")
 
         if not response.candidates:
@@ -159,23 +175,21 @@ print(response.usage_metadata.thoughts_token_count)
                 if response.prompt_feedback.safety_ratings:
                     error_message += f" Safety Ratings: {response.prompt_feedback.safety_ratings}"
             return BatchReviewData(error=error_message)
-
-        raw_json_text = ""
-        if response.candidates and response.candidates[0].content.parts:
-            for part in response.candidates[0].content.parts:
-                if part.text:
-                    raw_json_text += part.text
-
+        
+        # MODIFIED: The old loop is replaced by the separation logic above.
+        # We now use the `raw_json_text` which ONLY contains the payload.
+        
         if verbose:
+            # This now prints ONLY the JSON part, as intended.
             print(f"\nExtracted complete JSON text (length: {len(raw_json_text)}):")
             print(raw_json_text)
 
         if not raw_json_text.strip():
             return BatchReviewData(
-                error="Empty response from API",
+                error="Empty response from API (JSON payload was empty after separating thoughts)",
                 overall_batch_summary="Error: Empty response received",
                 file_reviews=[],
-                llm_processing_notes="API returned empty response"
+                llm_processing_notes="API returned an empty payload."
             )
 
         try:
