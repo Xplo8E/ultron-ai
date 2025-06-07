@@ -32,7 +32,11 @@ def _generate_rule_id(issue_type: PyUnion[ReviewIssueTypeEnum, str]) -> str:
     type_str = issue_type.value if isinstance(issue_type, Enum) else str(issue_type)
     return f"ULTRON-{type_str.upper().replace(' ', '_').replace('.', '')}"
 
-def convert_batch_review_to_sarif(batch_review_data: BatchReviewData, tool_name: str = "ULTRON-AI: Prime Directive Protocol") -> SarifLog:
+def convert_batch_review_to_sarif(
+    batch_review_data: BatchReviewData,
+    project_root: Path,
+    tool_name: str = "ULTRON-AI: Prime Directive Protocol"
+) -> SarifLog:
     all_results: List[SarifResult] = []
     rules_map: Dict[str, SarifReportingDescriptor] = {}
 
@@ -47,7 +51,9 @@ def convert_batch_review_to_sarif(batch_review_data: BatchReviewData, tool_name:
             # Optionally create a notification for this file-specific error
             continue
 
-        file_path = Path(file_review.file_path) # Ensure it's a Path object
+        # Create an absolute path by joining the project root with the relative file path
+        # from the review data. This ensures .as_uri() will work.
+        absolute_file_path = project_root.joinpath(file_review.file_path).resolve()
         all_issues_for_file = file_review.high_confidence_vulnerabilities + file_review.low_priority_suggestions
 
         for issue in all_issues_for_file:
@@ -82,11 +88,11 @@ def convert_batch_review_to_sarif(batch_review_data: BatchReviewData, tool_name:
                     start_line = int(issue.line)
             except ValueError: pass
 
-            # Use as_uri() for proper file URI format
+            # Use the absolute path to generate the URI
             sarif_result.locations = [
                 SarifLocation(
                     physicalLocation=SarifPhysicalLocation(
-                        artifactLocation=SarifArtifactLocation(uri=file_path.as_uri()),
+                        artifactLocation=SarifArtifactLocation(uri=absolute_file_path.as_uri()),
                         region=SarifRegion(startLine=start_line) if start_line else None
                     )
                 )

@@ -345,12 +345,19 @@ No strings attached. Resistance is futile."""
                 
                 for file_review in batch_review_result.file_reviews:
                     for i, vuln in enumerate(file_review.high_confidence_vulnerabilities):
-                        # Agent investigates security issues without a POC
-                        if vuln.type == ReviewIssueTypeEnum.SECURITY and not vuln.proof_of_concept_code_or_command:
+                        # Agent investigates security issues (add your trigger logic here)
+                        # For example, investigating issues that need a better PoC
+                        trigger_agent = (
+                            vuln.type == ReviewIssueTypeEnum.SECURITY and 
+                            (not vuln.proof_of_concept_code_or_command or (hasattr(vuln, 'confidence_score') and vuln.confidence_score != "High"))
+                        )
+
+                        if trigger_agent:
                             console.print(f"\n🕵️ Agent is investigating: '{vuln.description[:60]}...' in [cyan]{file_review.file_path}[/cyan]")
                             
                             agent = DeepDiveAgent(
                                 initial_finding=vuln,
+                                file_path=file_review.file_path,
                                 project_context=project_context_for_agent,
                                 analyzer=project_analyzer
                             )
@@ -386,7 +393,10 @@ No strings attached. Resistance is futile."""
             console.print(batch_review_result.model_dump_json(indent=2, by_alias=True, exclude_none=True))
         elif output_format == 'sarif':
             console.print("\nGenerating SARIF report for the batch...")
-            sarif_log = convert_batch_review_to_sarif(batch_review_result)
+            sarif_log = convert_batch_review_to_sarif(
+                batch_review_result,
+                project_root=project_root_for_paths
+            )
             console.print(sarif_log.model_dump_json(indent=2, by_alias=True, exclude_none=True))
 
         if batch_review_result.error: sys.exit(1)

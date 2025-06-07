@@ -25,6 +25,7 @@ class DeepDiveAgent:
 
     def __init__(self,
                  initial_finding: HighConfidenceVulnerability,
+                 file_path: str,
                  project_context: Dict[str, str],
                  analyzer: Optional[ProjectCodeAnalyzer] = None,
                  model_name: str = AVAILABLE_MODELS["2.0-flash"]):
@@ -33,6 +34,7 @@ class DeepDiveAgent:
             raise ValueError("GEMINI_API_KEY not found in environment. The agent cannot be initialized.")
 
         self.initial_finding = initial_finding
+        self.file_path = file_path
         self.project_context = project_context
         self.analyzer = analyzer
         self.model_name = model_name
@@ -107,7 +109,7 @@ class DeepDiveAgent:
         Think step-by-step. Use the provided tools to gather evidence.
 
         **Initial Potential Finding:**
-        - **File:** {self.initial_finding.file_path}
+        - **File:** {self.file_path}
         - **Line:** {self.initial_finding.line}
         - **Description:** {self.initial_finding.description}
 
