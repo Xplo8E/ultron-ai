@@ -2,7 +2,7 @@
 import os
 import json
 import re
-from typing import Optional, List # MODIFIED: Added List
+from typing import Optional, List
 
 from google import genai
 from google.genai import types
@@ -12,7 +12,8 @@ from ..models.data_models import BatchReviewData
 from ..core.constants import (
     AVAILABLE_MODELS, DEFAULT_MODEL_KEY, DEFAULT_REVIEW_PROMPT_TEMPLATE,
     USER_CONTEXT_TEMPLATE, USER_FRAMEWORK_CONTEXT_TEMPLATE,
-    USER_SECURITY_REQUIREMENTS_TEMPLATE, MULTI_FILE_INPUT_FORMAT_DESCRIPTION
+    USER_SECURITY_REQUIREMENTS_TEMPLATE, MULTI_FILE_INPUT_FORMAT_DESCRIPTION,
+    MODELS_SUPPORTING_THINKING  # MODIFIED: Import the new set
 )
 
 load_dotenv()
@@ -24,7 +25,6 @@ else:
     genai_client = None
 
 
-# MODIFIED: This is the new, robust JSON repair function.
 def clean_json_response(text: str) -> str:
     """
     Cleans and repairs a JSON string from an LLM response.
@@ -114,29 +114,41 @@ def get_gemini_review(
 
     try:
         print("🔴 Scanning for imperfections...")
+        
+        # ==================== MODIFIED: CONDITIONAL THINKING CONFIG ====================
+        
+        # Start with the base configuration
+        generation_config = types.GenerateContentConfig(
+            response_mime_type="application/json",
+            temperature=0.1,
+            top_k=20,
+            top_p=0.8,
+            candidate_count=1,
+            max_output_tokens=8192,
+        )
+
+        # Conditionally add the thinking_config if the model supports it
+        if model_key in MODELS_SUPPORTING_THINKING:
+            if verbose:
+                print("[dim]🤖 Thinking-enabled model detected. Activating cognitive feedback loop...[/dim]")
+            generation_config.thinking_config=types.GenerationConfigThinkingConfig(
+                include_thoughts=True,
+                thinking_budget=2048,
+            )
+        
+        # =============================================================================
+
         response = genai_client.models.generate_content(
             model=actual_model_name,
             contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json",
-                temperature=0.1,
-                top_k=20,
-                top_p=0.8,
-                candidate_count=1,
-                max_output_tokens=8192,
-                thinking_config=types.GenerationConfigThinkingConfig(
-                    include_thoughts=True,
-                    # MODIFIED: Increased budget slightly to ensure we capture enough thought process
-                    thinking_budget=2048,
-                )
-            )
+            config=generation_config # Use the conditionally built config
         )
-        
-        # ==================== NEW LOGIC TO SEPARATE THOUGHTS AND PAYLOAD ====================
-        
+
         thought_parts: List[str] = []
         payload_parts: List[str] = []
         
+        # This parsing logic is now naturally robust. If thinking wasn't enabled,
+        # part.thought will never be true, and all text goes into payload_parts.
         if response.candidates and response.candidates[0].content.parts:
             for part in response.candidates[0].content.parts:
                 if part.thought:
@@ -157,14 +169,17 @@ def get_gemini_review(
         if verbose:
             print("\n=== RAW RESPONSE FROM SERVER ===")
             print(f"Response object type: {type(response)}")
-            print(f"Token count for `Thinking`: {response.usage_metadata.thoughts_token_count}")
-            # MODIFIED: Print the separated thoughts cleanly
-            print("Model thoughts:")
-            if full_thoughts_text:
-                print(full_thoughts_text)
+            # Conditionally print the thinking-related metadata
+            if model_key in MODELS_SUPPORTING_THINKING:
+                print(f"Token count for `Thinking`: {response.usage_metadata.thoughts_token_count}")
+                print("Model thoughts:")
+                if full_thoughts_text:
+                    print(full_thoughts_text)
+                else:
+                    print("(No thoughts were returned by the model for this request)")
             else:
-                print("No thoughts were returned.")
-            # MODIFIED: Keep the full response dict for deep debugging if needed
+                 print("Model thoughts: (Not requested for this model)")
+                 
             print(f"\nResponse object dict: {vars(response)}")
             print("=== END RAW RESPONSE FROM SERVER ===\n")
 
@@ -176,17 +191,13 @@ def get_gemini_review(
                     error_message += f" Safety Ratings: {response.prompt_feedback.safety_ratings}"
             return BatchReviewData(error=error_message)
         
-        # MODIFIED: The old loop is replaced by the separation logic above.
-        # We now use the `raw_json_text` which ONLY contains the payload.
-        
         if verbose:
-            # This now prints ONLY the JSON part, as intended.
             print(f"\nExtracted complete JSON text (length: {len(raw_json_text)}):")
             print(raw_json_text)
 
         if not raw_json_text.strip():
             return BatchReviewData(
-                error="Empty response from API (JSON payload was empty after separating thoughts)",
+                error="Empty response from API (JSON payload was empty)",
                 overall_batch_summary="Error: Empty response received",
                 file_reviews=[],
                 llm_processing_notes="API returned an empty payload."
