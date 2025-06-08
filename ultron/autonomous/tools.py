@@ -7,6 +7,47 @@ from pathlib import Path
 # A simple dictionary to cache file contents during a single run.
 _file_cache = {}
 
+# --- NEW TOOL LOGIC ---
+def search_codebase(root_path: str, regex_pattern: str) -> str:
+    """
+    Recursively searches for a regex pattern in all files within the codebase,
+    respecting common exclusions.
+    """
+    matches = []
+    MAX_MATCHES = 100  # Prevent overwhelming the context window
+    root_path_obj = Path(root_path)
+
+    try:
+        # Compile the regex for efficiency
+        pattern = re.compile(regex_pattern)
+    except re.error as e:
+        return f"Error: Invalid regex pattern provided. Details: {e}"
+
+    for current_root, dirs, files in os.walk(root_path, topdown=True):
+        # Exclude common virtual environment, git, and cache folders
+        dirs[:] = [d for d in dirs if not d.startswith('.') and d not in ['__pycache__', 'venv', 'node_modules', '.git']]
+
+        for filename in files:
+            file_path = Path(current_root) / filename
+            # Skip binary files or other non-text files if possible
+            try:
+                with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    for i, line in enumerate(f):
+                        if pattern.search(line):
+                            relative_path = file_path.relative_to(root_path_obj)
+                            matches.append(f"{relative_path}:{i+1}: {line.strip()}")
+                            if len(matches) >= MAX_MATCHES:
+                                matches.append(f"\n... (Search stopped after reaching {MAX_MATCHES} matches) ...")
+                                return "\n".join(matches)
+            except Exception:
+                # Ignore files that can't be opened or read
+                continue
+    
+    if not matches:
+        return f"No matches found for pattern '{regex_pattern}' in the entire codebase."
+    
+    return "\n".join(matches)
+
 def get_directory_tree(root_path: str) -> str:
     """Generates a string representation of the directory tree."""
     tree_lines = []

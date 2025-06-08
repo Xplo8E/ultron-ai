@@ -1,30 +1,49 @@
 # ultron/autonomous/agent.py
 import os
+import time  # <--- ADD THIS
+import re    # <--- ADD THIS
 from pathlib import Path
+from datetime import datetime  # <--- ADD THIS
 from rich.console import Console
 from rich.markdown import Markdown
-from rich.pretty import pprint
+from rich.pretty import pprint      # For colorful console output
+from pprint import pformat          # For string formatting to log file
 from rich.panel import Panel
 from rich.text import Text
 from google.genai import Client, types
+from google.api_core import exceptions as google_exceptions # <--- ADD THIS for specific exceptions
 
 from .tools import (
     get_directory_tree,
     search_pattern_in_file,
     list_functions_in_file,
     find_taints_in_file,
+    search_codebase,  # <--- ADD THIS
 )
 from ..core.constants import AVAILABLE_MODELS, MODELS_SUPPORTING_THINKING  
 
 console = Console()
 
 class AutonomousAgent:
-    def __init__(self, codebase_path: str, model_key: str, mission: str, verbose: bool = False):
+    # --- MODIFIED: Add log_dir to __init__ and create log file ---
+    def __init__(self, codebase_path: str, model_key: str, mission: str, verbose: bool = False, log_dir: str = "logs"):
         self.codebase_path = Path(codebase_path).resolve()
         self.model_key = model_key
         self.mission = mission
         self.verbose = verbose
         self.supports_thinking = self.model_key in MODELS_SUPPORTING_THINKING
+        
+        # --- Logging Setup ---
+        self.log_dir = Path(log_dir)
+        self.log_dir.mkdir(parents=True, exist_ok=True)
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        self.log_file_path = self.log_dir / f"ultron_run_{timestamp}.log"
+        self._log(f"--- Ultron Run Initialized ---")
+        self._log(f"Timestamp: {datetime.now()}")
+        self._log(f"Model: {self.model_key}")
+        self._log(f"Mission: {self.mission}")
+        self._log(f"Codebase: {self.codebase_path}")
+        self._log("-" * 30)
         
         # --- MODIFIED: Define all tools for the model ---
         self.tools = [
@@ -72,6 +91,18 @@ class AutonomousAgent:
                             },
                             required=["file_path", "sources", "sinks"]
                         )
+                    ),
+                    # --- NEW: Add the search_codebase tool declaration ---
+                    types.FunctionDeclaration(
+                        name="search_codebase",
+                        description="Recursively searches the entire codebase for a regex pattern. Use this to find all occurrences of a function, setting, or keyword across all files.",
+                        parameters=types.Schema(
+                            type=types.Type.OBJECT,
+                            properties={
+                                "regex_pattern": types.Schema(type=types.Type.STRING, description="The regex pattern to search for globally.")
+                            },
+                            required=["regex_pattern"]
+                        )
                     )
                 ]
             )
@@ -83,6 +114,7 @@ class AutonomousAgent:
             "search_pattern": self.search_pattern,
             "list_functions": self.list_functions,
             "find_taint_sources_and_sinks": self.find_taint_sources_and_sinks,
+            "search_codebase": self.search_codebase, # <--- ADD THIS
         }
 
         api_key = os.getenv("GEMINI_API_KEY")
@@ -90,6 +122,12 @@ class AutonomousAgent:
             raise ValueError("GEMINI_API_KEY environment variable not set.")
         
         self.client = Client(api_key=api_key)
+
+    # --- NEW: Helper method for logging ---
+    def _log(self, content: str):
+        """Appends content to the run's log file."""
+        with open(self.log_file_path, "a", encoding="utf-8") as f:
+            f.write(content + "\n")
 
     def _resolve_and_validate_path(self, file_path: str) -> tuple[Path | None, str | None]:
         """Resolves a relative path to an absolute one and provides helpful errors."""
@@ -165,6 +203,14 @@ class AutonomousAgent:
         if error:
             return error
         return find_taints_in_file(str(absolute_path), sources, sinks)
+
+    # --- NEW: Add the handler method for the new tool ---
+    def search_codebase(self, regex_pattern: str) -> str:
+        """Handler for searching the entire codebase."""
+        console.print(f"**[Tool Call]** `search_codebase(regex_pattern='{regex_pattern}')`")
+        # The core logic is in tools.py, so we just call it.
+        # No path validation is needed as it operates from the root by design.
+        return search_codebase(str(self.codebase_path), regex_pattern)
         
     def _create_initial_prompt(self):
         directory_tree = get_directory_tree(str(self.codebase_path))
@@ -206,7 +252,8 @@ class AutonomousAgent:
 
     2. 🔍 **Inspect**: Use precise tool calls, such as:
     - `read_file_content(file_path)`
-    - `search_pattern(file_path, regex_pattern)`
+    - `search_pattern(file_path, regex_pattern)` # Search in one file
+    - `search_codebase(regex_pattern)` # Search in ALL files
     - `list_functions(file_path)`
     - `find_taint_sources_and_sinks(file_path, sources, sinks)`
 
@@ -273,8 +320,12 @@ class AutonomousAgent:
     Begin with your first hypothesis."""
 
 
-    def run(self, max_turns=100) -> str:
+    def run(self, max_turns=200) -> str:
+        # --- MODIFIED: Announce log file creation ---
+        console.print(Panel(f"📝 Logging full transcript to [bold cyan]{self.log_file_path}[/bold cyan]", style="blue"))
+        
         initial_prompt = self._create_initial_prompt()
+        self._log(f"\n--- Initial Prompt ---\n{initial_prompt}") # Log initial prompt
         chat_history = [
             types.Content(role="user", parts=[types.Part(text=initial_prompt)])
         ]
@@ -283,6 +334,22 @@ class AutonomousAgent:
         for turn in range(max_turns):
             turn_text = Text(f"🤖 ULTRON TURN {turn + 1}/{max_turns}", style="bold white")
             console.print(Panel(turn_text, style="bold cyan", padding=(0, 1)))
+            self._log(f"\n\n{'='*20} TURN {turn + 1}/{max_turns} {'='*20}")
+
+            # --- MODIFIED: Log the request being sent ---
+            self._log("\n--- Request to Model ---")
+            for message in chat_history:
+                self._log(f"Role: {message.role}")
+                for part in message.parts:
+                    log_part_content = ""
+                    if hasattr(part, 'text') and part.text:
+                        log_part_content = f"Text: {part.text}"
+                    elif hasattr(part, 'function_call'):
+                        log_part_content = f"Function Call: {part.function_call}"
+                    elif hasattr(part, 'function_response'):
+                        log_part_content = f"Function Response: {part.function_response}"
+                    self._log(log_part_content)
+                self._log("-" * 10)
 
             if self.verbose:
                 console.print("[bold cyan]➡️ Sending Request to Model...[/bold cyan]")
@@ -311,11 +378,49 @@ class AutonomousAgent:
             
             config = types.GenerateContentConfig(**config_args)
 
-            response = self.client.models.generate_content(
-                model=AVAILABLE_MODELS[self.model_key],
-                contents=chat_history,
-                config=config
-            )
+            # --- MODIFIED: Add more robust retry logic ---
+            response = None
+            max_retries = 3
+            for attempt in range(max_retries):
+                try:
+                    response = self.client.models.generate_content(
+                        model=AVAILABLE_MODELS[self.model_key],
+                        contents=chat_history,
+                        config=config
+                    )
+                    break
+                # Catch the more general API error from Google's libraries
+                except google_exceptions.GoogleAPICallError as e:
+                    # Check the content of the error to see if it's a rate limit issue
+                    error_str = str(e).upper()
+                    if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
+                        wait_time = 60
+                        
+                        match = re.search(r"'retryDelay': '(\d+)s'", str(e))
+                        if match:
+                            wait_time = int(match.group(1)) + 2
+
+                        panel_text = Text(f"Rate limit hit. Waiting for {wait_time}s before retrying ({attempt + 1}/{max_retries}).", style="bold yellow")
+                        console.print(Panel(panel_text, title="[yellow]Rate Limit Handler[/yellow]", border_style="yellow"))
+                        
+                        if attempt + 1 >= max_retries:
+                            console.print("[bold red]❌ CRITICAL: Max retries reached. Aborting run.[/bold red]")
+                            raise e
+                            
+                        time.sleep(wait_time)
+                    else:
+                        # If it's a different API error (e.g., Permission Denied), don't retry.
+                        console.print(f"[bold red]❌ An unexpected, non-retriable API error occurred: {e}[/bold red]")
+                        self._log(f"\n--- NON-RETRIABLE API ERROR ---\n{e}")
+                        raise e # Re-raise the original exception
+                except Exception as e:
+                    console.print(f"[bold red]❌ A critical unexpected error occurred: {e}[/bold red]")
+                    self._log(f"\n--- CRITICAL UNEXPECTED ERROR ---\n{e}")
+                    raise e
+            
+            if not response:
+                return "Agent failed to get a response from the API after multiple retries."
+            # --- END MODIFICATION ---
             
             # Extract and display token usage information
             if hasattr(response, 'usage_metadata') and response.usage_metadata:
@@ -327,6 +432,9 @@ class AutonomousAgent:
                 
                 token_text = Text(f"📊 Tokens: Prompt={prompt_tokens} | Output={output_tokens} | Thoughts={thought_tokens} | Total={total_tokens} | Model: {self.model_key} | Supports Thinking: {self.supports_thinking}", style="dim cyan")
                 console.print(Panel(token_text, style="dim blue", padding=(0, 1)))
+
+            # --- MODIFIED: Log the raw response and verbose data ---
+            self._log(f"\n--- Raw Response from Model ---\n{pformat(response)}")
 
             if self.verbose:
                 console.print("[bold magenta]⬅️ Received Raw Response From Model...[/bold magenta]")
@@ -347,6 +455,7 @@ class AutonomousAgent:
                 #     console.print(f"**💭 Thought Count:** {response.usage_metadata.thoughts_token_count}")
                 label = "**💭 Thought:**" if self.supports_thinking else "**🧠 Reasoning:**"
                 console.print(Markdown(f"{label}\n> {reasoning_text}"))
+                self._log(f"\n--- Parsed Reasoning/Thought ---\n{reasoning_text}") # Log parsed text
             
             if tool_call_part:
                 fn = tool_call_part.function_call
@@ -354,6 +463,7 @@ class AutonomousAgent:
                 fn_args = {key: value for key, value in fn.args.items()}
 
                 console.print(f"**🛠️ Calling Tool:** `{fn_name}({fn_args})`")
+                self._log(f"\n--- Tool Call ---\n{fn_name}({pformat(fn_args)})") # Log tool call
 
                 tool_func = self.tool_handlers.get(fn_name)
                 if tool_func:
@@ -363,6 +473,7 @@ class AutonomousAgent:
 
                 print("Output tokens:",response.usage_metadata.candidates_token_count)
                 console.print(Markdown(f"**🔬 Observation:**\n```\n{result}\n```"))
+                self._log(f"\n--- Tool Observation ---\n{result}") # Log tool result
                 # print output tokens when printing the output everytime
                 tool_response_part = types.Part.from_function_response(name=fn_name, response={"result": result})
                 chat_history.append(candidate.content)
@@ -378,5 +489,8 @@ class AutonomousAgent:
                     final_report = "Agent finished without a textual report."
                 break
 
-        return final_report or "Agent reached maximum turns without providing a final report."
+        # --- MODIFIED: Log the final report ---
+        final_report_text = final_report or "Agent reached maximum turns without providing a final report."
+        self._log(f"\n\n{'='*20} FINAL REPORT {'='*20}\n{final_report_text}")
+        return final_report_text
     
