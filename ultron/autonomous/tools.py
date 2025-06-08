@@ -1,5 +1,7 @@
 # ultron/autonomous/tools.py
 import os
+import re
+import ast
 from pathlib import Path
 
 # A simple dictionary to cache file contents during a single run.
@@ -41,14 +43,108 @@ def read_file_content(file_path: str) -> str:
     Reads the full text content of a single file from the provided codebase.
     The file path must be relative to the project root.
     """
-    # This function will be called by the agent, which lives in a class.
-    # The class will hold the 'codebase_path' and pass it implicitly.
-    # For now, we define the tool's logic. The class will handle the path joining.
-    # This is a placeholder for the logic that will live inside the agent class.
-    # The actual implementation needs the root path.
-    # We will handle this inside the agent's execution logic.
-    pass # The real logic will be in the agent class method that calls this.
+    # This function is a placeholder. The real logic is implemented
+    # as a method in the AutonomousAgent class.
+    pass
 
+
+# --- NEW CORE LOGIC FUNCTIONS ---
+
+class FunctionVisitor(ast.NodeVisitor):
+    """An AST visitor to find all function and method names."""
+    def __init__(self):
+        self.functions = []
+        self._current_class = None
+
+    def visit_ClassDef(self, node):
+        self._current_class = node.name
+        self.generic_visit(node)
+        self._current_class = None
+
+    def visit_FunctionDef(self, node):
+        if self._current_class:
+            self.functions.append(f"{self._current_class}.{node.name}")
+        else:
+            self.functions.append(node.name)
+        # Do not call generic_visit to avoid capturing nested functions separately for simplicity.
+
+def list_functions_in_file(file_path: str) -> str:
+    """Parses a Python file and lists all function and class method definitions."""
+    if not file_path.endswith('.py'):
+        return f"Error: Not a Python (.py) file. Use 'read_file_content' to inspect its type and content."
+
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        
+        tree = ast.parse(content)
+        visitor = FunctionVisitor()
+        visitor.visit(tree)
+        
+        if not visitor.functions:
+            return f"No functions or methods found in {os.path.basename(file_path)}. The file might be for configuration, data, or initialization. Use 'read_file_content' to verify its purpose."
+            
+        return "Found Functions:\n- " + "\n- ".join(sorted(visitor.functions))
+    except SyntaxError as e:
+        return f"Error: Invalid Python syntax in {file_path}. Cannot parse functions. Use 'read_file_content' to inspect the syntax error. Details: {e}"
+    except Exception as e:
+        return f"Error parsing Python file {file_path}: {e}"
+
+def search_pattern_in_file(file_path: str, regex_pattern: str) -> str:
+    """Searches for a regex pattern in a file and returns matching lines with line numbers."""
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+        
+        matches = []
+        for i, line in enumerate(lines):
+            if re.search(regex_pattern, line):
+                matches.append(f"L{i+1}: {line.strip()}")
+        
+        if not matches:
+            return f"No matches found for pattern '{regex_pattern}'."
+        
+        return "\n".join(matches)
+    except Exception as e:
+        return f"Error searching in file {file_path}: {e}"
+
+def find_taints_in_file(file_path: str, sources: list[str], sinks: list[str]) -> str:
+    """Finds lines containing source and sink keywords to spot potential data flows."""
+    try:
+        with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+            lines = f.readlines()
+        
+        found_sources = []
+        found_sinks = []
+        
+        for i, line in enumerate(lines):
+            for source in sources:
+                if source in line:
+                    found_sources.append(f"L{i+1} (Source: {source}): {line.strip()}")
+                    break # Don't match same line for multiple sources
+            
+            for sink in sinks:
+                if sink in line:
+                    found_sinks.append(f"L{i+1} (Sink: {sink}): {line.strip()}")
+                    break # Don't match same line for multiple sinks
+
+        if not found_sources and not found_sinks:
+             return "No matches found for the provided keywords. This could mean the code is safe, OR the keywords are incorrect for this project's framework. Use `read_file_content` on this file and relevant imported modules to discover the correct data input and execution function names, then try this tool again with better keywords."
+
+        result_parts = []
+        if found_sources:
+            result_parts.append("---\nFound Potential Sources:\n" + "\n".join(found_sources))
+        else:
+            result_parts.append("---\nNo matching sources found. The sinks might still be exploitable if the source is in another file.")
+
+        if found_sinks:
+            result_parts.append("---\nFound Potential Sinks:\n" + "\n".join(found_sinks))
+        else:
+            result_parts.append("---\nNo matching sinks found.")
+            
+        return "\n".join(result_parts)
+    except Exception as e:
+        return f"Error during taint analysis of file {file_path}: {e}"
 
 # This function will return the list of tool functions the agent can use.
 def get_available_tools():

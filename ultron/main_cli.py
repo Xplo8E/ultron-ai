@@ -427,15 +427,15 @@ def autonomous_review_command(path, model_key, mission, verbose):
     try:
         agent = AutonomousAgent(
             codebase_path=path,
-            model_key=AVAILABLE_MODELS[model_key],
+            model_key=model_key,
             mission=mission,
             verbose=verbose
         )
         
         final_report = agent.run()
         
-        console.print("\n\n================ FINAL REPORT ================\n")
-        console.print(final_report)
+        # console.print("\n\n================ FINAL REPORT ================\n")
+        # console.print(final_report)
 
     except Exception as e:
         console.print(f"\n[bold red]❌ CRITICAL AGENT FAILURE:[/bold red] {e}")
