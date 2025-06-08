@@ -21,7 +21,7 @@ console = Console()
 class AutonomousAgent:
     def __init__(self, codebase_path: str, model_key: str, mission: str, verbose: bool = False):
         self.codebase_path = Path(codebase_path).resolve()
-        self.model_key = AVAILABLE_MODELS[model_key]
+        self.model_key = model_key
         self.mission = mission
         self.verbose = verbose
         self.supports_thinking = self.model_key in MODELS_SUPPORTING_THINKING
@@ -171,7 +171,9 @@ class AutonomousAgent:
         mission = self.mission or "Perform a deep static security audit to discover the most critical, practically exploitable vulnerabilities in the codebase and produce working Proofs of Concept."
 
         return f"""
-    You are a specialized static analysis agent tasked with uncovering **high-confidence**, **practically exploitable** vulnerabilities. Use **chain-of-thought**: clearly articulate your hypothesis, then select the minimal tool call to validate it. Iterate this loop until you either confirm an exploit or exhaust relevant code paths.
+    You are an expert security code reviewer. Your primary goal is to identify **valid, practically exploitable vulnerabilities** with **verifiable Proofs of Concept (POCs)**. 
+    
+    Use **chain-of-thought**: clearly articulate your hypothesis, then select the minimal tool call to validate it. Iterate this loop until you either confirm an exploit or exhaust relevant code paths.
 
     **MISSION**: {mission}
 
@@ -179,6 +181,14 @@ class AutonomousAgent:
     {directory_tree}
 
     ---
+
+    **Requirements for Proofs of Concept (POCs):**
+    -   Write complete executable code (e.g., `curl` commands, Python scripts, JavaScript payloads, etc.).
+    -   Include exact endpoints, parameters, and payload values needed.
+    -   Specify HTTP methods, headers, and request/response formats where applicable.
+    -   Show both the malicious input AND the expected malicious output.
+    -   If chaining multiple steps, number them and show the output of each step.
+    -   For client-side exploits, provide the exact HTML/JS payload and how to deliver it.
 
     ## TOOL USAGE GUIDELINES
 
@@ -281,7 +291,7 @@ class AutonomousAgent:
                     text_content = ""
                     for part in message.parts:
                         if hasattr(part, 'text') and part.text:
-                            text_content += part.text + "\n........................."
+                            text_content += part.text + "\n.........................\n"
                     if text_content:
                         console.print(f"Content: {text_content}")
                 console.print("-" * 20)
@@ -302,7 +312,7 @@ class AutonomousAgent:
             config = types.GenerateContentConfig(**config_args)
 
             response = self.client.models.generate_content(
-                model=self.model_key,
+                model=AVAILABLE_MODELS[self.model_key],
                 contents=chat_history,
                 config=config
             )
@@ -315,7 +325,7 @@ class AutonomousAgent:
                 thought_tokens = getattr(usage, 'thoughts_token_count', 0)
                 total_tokens = getattr(usage, 'total_token_count', 0)
                 
-                token_text = Text(f"📊 Tokens: Prompt={prompt_tokens} | Output={output_tokens} | Thoughts={thought_tokens} | Total={total_tokens}", style="dim cyan")
+                token_text = Text(f"📊 Tokens: Prompt={prompt_tokens} | Output={output_tokens} | Thoughts={thought_tokens} | Total={total_tokens} | Model: {self.model_key} | Supports Thinking: {self.supports_thinking}", style="dim cyan")
                 console.print(Panel(token_text, style="dim blue", padding=(0, 1)))
 
             if self.verbose:
@@ -333,8 +343,8 @@ class AutonomousAgent:
             # print("Thoughts tokens:",response.usage_metadata.thoughts_token_count)
             if all_text_parts:
                 reasoning_text = "\n".join(all_text_parts)
-                if self.supports_thinking:
-                    console.print(f"**💭 Thought Count:** {response.usage_metadata.thoughts_token_count}")
+                # if self.supports_thinking:
+                #     console.print(f"**💭 Thought Count:** {response.usage_metadata.thoughts_token_count}")
                 label = "**💭 Thought:**" if self.supports_thinking else "**🧠 Reasoning:**"
                 console.print(Markdown(f"{label}\n> {reasoning_text}"))
             
