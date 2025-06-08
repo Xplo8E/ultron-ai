@@ -257,6 +257,7 @@ class AutonomousAgent:
     **RULES:**
     - **Do not** report style issues or unproven best practices.
     - **Do not** include any text beyond the specified templates.
+    - The report **MUST NOT** be wrapped in code fences (e.g., ` ```markdown `) and **MUST NOT** have any other text, reasoning, or conversation before or after it.
     - **Stop** tool usage as soon as you have a confirmed exploit or final conclusion.
 
     Begin with your first hypothesis."""
