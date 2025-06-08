@@ -21,6 +21,7 @@ try:
     from .reporting.sarif_converter import convert_batch_review_to_sarif
     from .engine.code_analyzer import ProjectCodeAnalyzer
     from .engine.agent import DeepDiveAgent
+    from .autonomous.agent import AutonomousAgent
     from . import __version__ as cli_version
 except ImportError as e:
     print(f"ImportError in main_cli.py: {e}", file=sys.stderr)
@@ -409,6 +410,36 @@ No strings attached. Resistance is futile."""
     
     if batch_review_result and any(fr.error for fr in batch_review_result.file_reviews if fr.error):
          console.print("[bold yellow]⚠️ Some files encountered analysis errors[/bold yellow]")
+
+
+@cli.command("autonomous-review")
+@click.option('--path', '-p', type=click.Path(exists=True, resolve_path=True), required=True, help="Path to the codebase directory to analyze.")
+@click.option('--model-key', '-m', type=click.Choice(list(AVAILABLE_MODELS.keys())), default=DEFAULT_MODEL_KEY, help="Gemini model for the agent's reasoning.")
+@click.option('--mission', '-M', required=False, help="An optional, high-level objective for the agent.")
+@click.option('-verbose', '-v', is_flag=True, default=False, help="Print detailed debug information about requests and responses.")
+
+def autonomous_review_command(path, model_key, mission, verbose):
+    """🚀 Unleash the Autonomous Agent for a mission-driven security review."""
+    console = Console()
+    console.print(f"[bold blue]🚀 INITIATING AUTONOMOUS AGENT PROTOCOL 2.0 🚀[/bold blue]")
+    console.print(f"[cyan]Mission:[/cyan] {mission}")
+    
+    try:
+        agent = AutonomousAgent(
+            codebase_path=path,
+            model_key=AVAILABLE_MODELS[model_key],
+            mission=mission,
+            verbose=verbose
+        )
+        
+        final_report = agent.run()
+        
+        console.print("\n\n================ FINAL REPORT ================\n")
+        console.print(final_report)
+
+    except Exception as e:
+        console.print(f"\n[bold red]❌ CRITICAL AGENT FAILURE:[/bold red] {e}")
+
 
 if __name__ == '__main__':
     cli()
