@@ -253,7 +253,7 @@ class AutonomousAgent:
     1.  **Trace Complete?** Have I used tools (`search_codebase`, etc.) to trace the full data flow from the untrusted source to the dangerous sink?
     2.  **No Sanitization?** Have I used tools to search for and confirm that sanitization functions along the data path are absent, flawed, or bypassed?
     3.  **Conditions Met?** Have I used tools to verify the conditions required for the exploit (e.g., a required feature flag is enabled by default)?
-    4.  **PoC is Verifiable?** Is my Proof of Concept based on concrete code paths I have personally verified with tools, not assumptions?
+    4.  **PoC is Grounded in Reality?** Is my Proof of Concept based on **real, documented commands and directives** for the target technology (e.g., Nginx, Bash)? Have I avoided inventing functions or commands? If the exploit is complex (e.g., requires multiple steps), have I accurately represented this?
 
     ---
 
@@ -295,14 +295,17 @@ class AutonomousAgent:
     ---
 
     ## REPORT TEMPLATES
-
+    
     ### If a vulnerability is found:
     ```markdown
     # ULTRON-AI Security Finding
-
+    
     **Vulnerability:** [Concise title]
     **Severity:** [Critical | High | Medium | Low]
     **CWE:** [CWE-XX]
+    **Confidence:** [High | Medium] 
+    # High: The PoC uses real, documented commands and is highly likely to work.
+    # Medium: The PoC is conceptual. It demonstrates the flaw, but the specific commands may need adaptation.
 
     ---
 
@@ -310,7 +313,7 @@ class AutonomousAgent:
     [Detailed explanation of the flaw and its root cause.]
 
     ### Attack Chain
-    [Step-by-step exploitation path from entry point to impact.]
+    [Step-by-step exploitation path from entry point to impact. For complex exploits, number the steps clearly.]
 
     ### Proof of Concept (PoC)
     ```bash
@@ -341,6 +344,7 @@ class AutonomousAgent:
     ---
 
     **RULES:**
+    - **Your PoC must be grounded in reality.** Only use commands, flags, and directives that are documented for the target technology. **DO NOT INVENT COMMANDS.** If you are not certain how to write a working PoC, explain the conceptual attack chain and set the Confidence to "Medium".
     - **A code comment is a HINT, not a confirmation.** You MUST use tools to verify all claims and data paths.
     - **Each turn must end in a tool call**, unless you have completed the checklist and are writing the final report.
     - **If you state that your next step is to use a tool, you MUST end your turn by calling that tool.** Do not state a plan and then write a report in the same turn.
@@ -348,7 +352,8 @@ class AutonomousAgent:
     - **Do not** include any text beyond the specified templates.
     - **Do not** report style issues, theoretical risks, or unproven best practices. Focus only on exploitable vulnerabilities.
 
-    Begin with your first hypothesis."""
+    Begin with your first hypothesis and corresponding tool call.
+    """
 
 
     def run(self, max_turns=200) -> str:
@@ -465,7 +470,7 @@ class AutonomousAgent:
                 thought_tokens = getattr(usage, 'thoughts_token_count', 0)
                 total_tokens = getattr(usage, 'total_token_count', 0)
                 
-                token_text = Text(f"📊 Tokens: Prompt={prompt_tokens} | Output={output_tokens} | Thoughts={thought_tokens} | Total={total_tokens} | Model: {self.model_key} | Supports Thinking: {self.supports_thinking}", style="dim cyan")
+                token_text = Text(f"📊 Tokens: Prompt={prompt_tokens} | Output={output_tokens} | Thoughts={thought_tokens} | Total={total_tokens} | Model: {self.model_key} | Supports Thinking: {self.supports_thinking} | Turn: {turn + 1}/{max_turns}", style="dim cyan")
                 console.print(Panel(token_text, style="dim blue", padding=(0, 1)))
 
             # --- MODIFIED: Log the raw response and verbose data ---
