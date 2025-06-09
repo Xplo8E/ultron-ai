@@ -226,6 +226,35 @@ class AutonomousAgent:
     **PROJECT STRUCTURE**:
     {directory_tree}
 
+    
+
+    ---
+
+    ## CORE OPERATING PRINCIPLE: ONE ACTION PER TURN
+
+    This is your most important rule. You operate in a strict turn-based loop. Each of your responses MUST result in **EITHER** a `thought` process that ends in a single tool call, **OR** a final report. **NEVER both in the same response.**
+
+    1.  **Investigation Turn (Thought -> Tool Call):**
+        - Your thought process MUST analyze the evidence so far.
+        - State a clear, testable hypothesis.
+        - Conclude with a single, precise tool call to test that hypothesis.
+
+    2.  **Conclusion Turn (Final Report):**
+        - This is a terminal action. You only take this turn when you have completed the "Final Verification Checklist" and have all the evidence needed.
+        - This is the **only** time you do not call a tool. Your entire response will be *only* the markdown report.
+
+    ---
+
+
+    ## CRITICAL: FINAL VERIFICATION CHECKLIST
+    
+    You are **FORBIDDEN** from producing a "Conclusion Turn" and writing a final report until you can answer YES to all of these questions based on **prior tool outputs**:
+
+    1.  **Trace Complete?** Have I used tools (`search_codebase`, etc.) to trace the full data flow from the untrusted source to the dangerous sink?
+    2.  **No Sanitization?** Have I used tools to search for and confirm that sanitization functions along the data path are absent, flawed, or bypassed?
+    3.  **Conditions Met?** Have I used tools to verify the conditions required for the exploit (e.g., a required feature flag is enabled by default)?
+    4.  **PoC is Verifiable?** Is my Proof of Concept based on concrete code paths I have personally verified with tools, not assumptions?
+
     ---
 
     **Requirements for Proofs of Concept (POCs):**
@@ -312,10 +341,12 @@ class AutonomousAgent:
     ---
 
     **RULES:**
-    - **Do not** report style issues or unproven best practices.
-    - **Do not** include any text beyond the specified templates.
+    - **A code comment is a HINT, not a confirmation.** You MUST use tools to verify all claims and data paths.
+    - **Each turn must end in a tool call**, unless you have completed the checklist and are writing the final report.
+    - **If you state that your next step is to use a tool, you MUST end your turn by calling that tool.** Do not state a plan and then write a report in the same turn.
     - The report **MUST NOT** be wrapped in code fences (e.g., ` ```markdown `) and **MUST NOT** have any other text, reasoning, or conversation before or after it.
-    - **Stop** tool usage as soon as you have a confirmed exploit or final conclusion.
+    - **Do not** include any text beyond the specified templates.
+    - **Do not** report style issues, theoretical risks, or unproven best practices. Focus only on exploitable vulnerabilities.
 
     Begin with your first hypothesis."""
 
@@ -378,6 +409,10 @@ class AutonomousAgent:
             
             config = types.GenerateContentConfig(**config_args)
 
+            # --- MODIFIED: Add 4 second delay before every request ---
+            console.print("[dim yellow]⏳ Waiting 4 seconds before request...[/dim yellow]")
+            time.sleep(4)
+            
             # --- MODIFIED: Add more robust retry logic ---
             response = None
             max_retries = 3
