@@ -2,6 +2,7 @@
 import os
 import re
 import ast
+import subprocess
 from pathlib import Path
 
 # A simple dictionary to cache file contents during a single run.
@@ -186,6 +187,70 @@ def find_taints_in_file(file_path: str, sources: list[str], sinks: list[str]) ->
         return "\n".join(result_parts)
     except Exception as e:
         return f"Error during taint analysis of file {file_path}: {e}"
+
+# --- NEW GENERAL-PURPOSE DYNAMIC TOOLS ---
+
+def write_to_file(file_path: str, content: str) -> str:
+    """
+    Writes or overwrites a file with the given string content.
+    This tool is essential for creating Proof of Concept (PoC) files,
+    test scripts, configuration files, or proposed code patches.
+    It will create parent directories if they do not exist.
+    """
+    # The actual path validation will be done by the agent's handler method
+    # to ensure it stays within the designated codebase directory.
+    try:
+        path_obj = Path(file_path)
+        path_obj.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(path_obj, 'w', encoding='utf-8') as f:
+            f.write(content)
+
+        return f"Success: Wrote {len(content.encode('utf-8'))} bytes to '{file_path}'."
+    except Exception as e:
+        return f"Error: Failed to write to file '{file_path}'. Reason: {e}"
+
+def execute_shell_command(command: str, working_directory: str) -> str:
+    """
+    Executes a shell command in a specified directory and returns its output.
+    This is a powerful tool for dynamic analysis and interaction.
+    Use it for:
+    - Compiling the codebase (e.g., 'make', 'mvn install', 'go build').
+    - Running test suites (e.g., 'pytest', 'npm test').
+    - Executing the application with a PoC (e.g., './app < poc.txt', 'python main.py --config config.json').
+    - Using generic system utilities for inspection ('ls -la', 'cat /etc/passwd').
+
+    !!! SECURITY WARNING: This tool executes arbitrary code. It MUST only be used in a
+    secure, sandboxed environment.
+    """
+    try:
+        result = subprocess.run(
+            command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=90,  # A generous timeout for compilation or tests
+            cwd=working_directory,
+            encoding='utf-8',
+            errors='ignore'
+        )
+
+        output = f"Exit Code: {result.returncode}\n"
+        if result.stdout:
+            output += f"--- STDOUT ---\n{result.stdout.strip()}\n"
+        if result.stderr:
+            output += f"--- STDERR ---\n{result.stderr.strip()}\n"
+
+        # Highlight common crash signatures for the agent to notice
+        if "AddressSanitizer" in result.stderr or "Segmentation fault" in result.stderr or "panic:" in result.stderr:
+            output += "\n*** POTENTIAL CRASH DETECTED in STDERR. Analyze the output carefully. ***"
+
+        return output.strip()
+
+    except subprocess.TimeoutExpired:
+        return "Error: Command timed out after 90 seconds. It may be a long-running process or it may have hung."
+    except Exception as e:
+        return f"Error: An unexpected exception occurred while executing the command. Reason: {e}"
 
 # This function will return the list of tool functions the agent can use.
 def get_available_tools():

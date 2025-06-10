@@ -8,7 +8,7 @@ AVAILABLE_MODELS = {
 }
 # 2.5-flash-05-20 is the best free model for the agent
 # Set the default for the main 'review' command to the best free general-purpose model
-DEFAULT_MODEL_KEY = "2.5-flash-05-20"
+DEFAULT_MODEL_KEY = "2.0-flash"
 
 # --- NEW: Set of models known to support the 'thinking' feature ---
 MODELS_SUPPORTING_THINKING = {

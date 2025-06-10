@@ -1,0 +1,65 @@
+# Version control
+.git
+.gitignore
+
+# Python artifacts  
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# IDE and editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Log files
+*.log
+logs/
+test_logs/
+
+# Test files and directories
+test/
+test_logs/
+demo_*.py
+
+# Documentation
+*.md
+docs/
+
+# Research and temporary files
+research/
+*.tmp
+*.temp 

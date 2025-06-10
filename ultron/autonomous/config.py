@@ -1,0 +1,32 @@
+"""
+Configuration management for Ultron autonomous agent.
+"""
+
+from dataclasses import dataclass
+from pathlib import Path
+
+@dataclass
+class AgentConfig:
+    """
+    Holds all configuration for an agent run.
+    
+    This centralizes configuration management and makes it easy to 
+    pass around agent settings without having many individual parameters.
+    """
+    codebase_path: Path
+    model_key: str
+    mission: str
+    log_file_path: Path
+    verbose: bool = False
+    
+    def __str__(self) -> str:
+        """String representation for logging purposes."""
+        return (
+            f"AgentConfig(\n"
+            f"  codebase_path={self.codebase_path}\n"
+            f"  model_key={self.model_key}\n"
+            f"  mission={self.mission}\n"
+            f"  log_file_path={self.log_file_path}\n"
+            f"  verbose={self.verbose}\n"
+            f")"
+        ) 

@@ -1,0 +1,8 @@
+--- Ultron Run Initialized ---
+AgentConfig(
+  codebase_path=/Users/apple/projects/ultron-ai
+  model_key=flash-8b
+  mission=Test mission
+  log_file_path=test_logs/ultron_run_20250610_070428.log
+  verbose=False
+)
