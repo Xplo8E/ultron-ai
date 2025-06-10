@@ -47,9 +47,10 @@ Examples:
     )
     parser.add_argument(
         "--model-key",
+        choices=["2.0-flash-lite", "2.0-flash", "2.5-flash-05-20"],
         default="2.5-flash-05-20",
         help="The Gemini model key for the agent's reasoning (default: 2.5-flash-05-20).\n"
-             "Other options: flash-8b, 2.5-pro"
+             "Options: 2.0-flash-lite, 2.0-flash, 2.5-flash-05-20"
     )
     parser.add_argument(
         "--image-name",
@@ -68,12 +69,7 @@ Examples:
         help="Enable verbose mode for the agent inside the container.\n"
              "Shows detailed tool calls and reasoning."
     )
-    parser.add_argument(
-        "--max-turns",
-        type=int,
-        default=50,
-        help="Maximum number of analysis turns for the agent (default: 50)."
-    )
+
     parser.add_argument(
         "--network-isolation",
         action="store_true",
@@ -89,19 +85,32 @@ Examples:
     # --- 1. Build the Docker Image (if not skipped) ---
     if not args.no_build:
         print(f"🐳 Building Docker image '{args.image_name}'...")
-        print("    This may take a few minutes on first run...")
+        print("    This may take 3-5 minutes on first run (installing packages)...")
+        print("    Subsequent builds will be much faster (cached layers)...")
         
         build_command = ["docker", "build", "-t", args.image_name, "."]
         try:
-            result = subprocess.run(build_command, check=True, capture_output=True, text=True)
-            print("✅ Docker image built successfully.")
-            if args.verbose:
-                print(f"Build output: {result.stdout}")
-        except subprocess.CalledProcessError as e:
-            print(f"❌ Docker build failed. Aborting.")
-            print(f"--- STDERR ---\n{e.stderr}")
-            if e.stdout:
-                print(f"--- STDOUT ---\n{e.stdout}")
+            # Stream the build output in real-time
+            print("📦 Docker build progress:")
+            print("-" * 50)
+            process = subprocess.Popen(build_command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, 
+                                     universal_newlines=True, bufsize=1)
+            
+            # Print output in real-time
+            for line in iter(process.stdout.readline, ''):
+                print(f"  {line.rstrip()}")
+            
+            process.wait()
+            
+            if process.returncode != 0:
+                print(f"\n❌ Docker build failed with exit code {process.returncode}")
+                return 1
+            else:
+                print("-" * 50)
+                print("✅ Docker image built successfully.")
+                
+        except Exception as e:
+            print(f"❌ Docker build failed: {e}")
             return 1
     else:
         print(f"⏭️  Skipping Docker build, using existing image '{args.image_name}'")
@@ -126,8 +135,10 @@ Examples:
         "--tty",               # Allocate a pseudo-TTY for colored output
         "--cap-drop=ALL",       # Crucial security: drop all Linux capabilities
         "--read-only",          # Make the container filesystem read-only
-        "--tmpfs", "/tmp",      # Allow temporary files in /tmp
-        "--tmpfs", "/workspace/.ultron_temp",  # Temp space for agent
+        "--tmpfs", "/tmp:size=100M,noexec,nosuid,nodev",      # Allow temporary files in /tmp
+        "--tmpfs", "/root/.cache/ultron:size=50M,uid=0,gid=0",  # Cache directory for agent
+        "--tmpfs", "/workspace/.ultron_temp:size=50M,uid=0,gid=0",  # Temp space for agent
+        "--tmpfs", "/agent/logs:size=10M,uid=0,gid=0",  # Writable logs directory
         
         # Mount the user's target directory into the container's workspace
         "-v", f"{host_target_path}:{container_workspace_path}",
@@ -146,7 +157,6 @@ Examples:
         "--path", container_workspace_path,
         "--mission", args.mission,
         "--model-key", args.model_key,
-        "--max-turns", str(args.max_turns),
     ]
     
     # Add network isolation if requested
@@ -156,7 +166,20 @@ Examples:
     
     # Add verbose flag if requested
     if args.verbose:
-        docker_command.append("--verbose")
+        docker_command.append("-verbose")
+    
+    # Build the ultron command display (for user reference)
+    ultron_command_parts = [
+        "python", "-m", "ultron.main_cli", "autonomous-review",
+        "--path", container_workspace_path,
+        "--mission", args.mission,
+        "--model-key", args.model_key,
+    ]
+    
+    if args.verbose:
+        ultron_command_parts.append("-verbose")
+    
+    ultron_command_display = " ".join(f'"{part}"' if " " in part else part for part in ultron_command_parts)
     
     # Display launch information
     print(f"\n📁 Target Analysis:")
@@ -164,13 +187,14 @@ Examples:
     print(f"    CONTAINER PATH: {container_workspace_path}")
     print(f"\n🎯 Mission: '{args.mission}'")
     print(f"🤖 Model: {args.model_key}")
-    print(f"🔄 Max Turns: {args.max_turns}")
+    print(f"\n⚡ Ultron Command (inside container):")
+    print(f"    {ultron_command_display}")
     
     # Check if target contains obvious files
     common_files = ["main.c", "app.py", "index.js", "Makefile", "requirements.txt"]
     found_files = [f for f in common_files if (host_target_path / f).exists()]
     if found_files:
-        print(f"📋 Detected files: {', '.join(found_files)}")
+        print(f"\n📋 Detected files: {', '.join(found_files)}")
     
     print(f"\n{'='*60}")
     print("🔥 LAUNCHING ULTRON AUTONOMOUS AGENT")

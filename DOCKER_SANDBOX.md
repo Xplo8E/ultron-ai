@@ -78,8 +78,7 @@ python run_autonomous.py \
     --target ./complex_app \
     --mission "Comprehensive security audit focusing on authentication bypass" \
     --model-key 2.5-pro \
-    --verbose \
-    --max-turns 75
+    --verbose
 ```
 
 ## Command Reference
@@ -94,7 +93,6 @@ python run_autonomous.py \
 - `--model-key MODEL`: Gemini model to use (default: 2.5-flash-05-20)
   - Options: `flash-8b`, `2.5-flash-05-20`, `2.5-pro`
 - `--verbose`: Show detailed agent reasoning and tool calls
-- `--max-turns N`: Maximum analysis turns (default: 50)
 - `--no-build`: Skip Docker image build (for subsequent runs)
 - `--network-isolation`: Disable network access for max security
 - `--image-name NAME`: Custom Docker image name
@@ -193,10 +191,12 @@ The agent follows this general pattern:
 ## Troubleshooting
 
 ### Docker Build Fails
+The build process now shows live progress logs. If a build fails, you'll see exactly where and why.
+
 ```bash
 # Clean build without cache
 docker system prune -f
-python run_autonomous.py --target ./myapp --mission "test" --no-build false
+python run_autonomous.py --target ./myapp --mission "test"
 ```
 
 ### Permission Denied Errors
@@ -216,7 +216,6 @@ chmod -R 755 your_target_directory
 - Check your firewall/proxy settings if API calls fail
 
 ### Out of Memory/Resources
-- Reduce `--max-turns` for complex analysis
 - Use `flash-8b` model for lower resource usage
 - Check `docker stats` to monitor resource usage
 

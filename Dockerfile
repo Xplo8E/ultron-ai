@@ -31,9 +31,10 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/* \
     && pip install --no-cache-dir -e .
 
-# Create the agent's sandboxed workspace. This is the directory
-# the user's target code will be mounted into.
-RUN mkdir /workspace
+# Create the agent's sandboxed workspace and cache directory
+# The workspace is where user's target code will be mounted
+# The cache directory is needed for ultron's internal caching
+RUN mkdir /workspace && mkdir -p /root/.cache/ultron
 
-# Set the entrypoint to the ultron CLI tool, which was installed by setup.py
-ENTRYPOINT ["ultron"] 
+# Set the entrypoint to run ultron via the Python module
+ENTRYPOINT ["python", "-m", "ultron.main_cli"] 

@@ -46,3 +46,6 @@ Thumbs.db
 
 test/
 logs/
+test-target/*
+test_target/*
+test_target/app.py
