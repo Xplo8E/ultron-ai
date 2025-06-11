@@ -1,0 +1,9 @@
+--- Ultron Run Initialized ---
+AgentConfig(
+  codebase_path=/Users/apple/projects/ultron-ai/test_data/DeepAndroid
+  model_key=2.0-flash
+  mission=This is an android app decompiled code, mainly focus on the code file that are related to the android app based on the package name, find all the exploitable vulnerabilities, write the poc code/poc commands correctly
+  verification_target=None
+  log_file_path=agent_runs/ultron_run_20250611_103648.log
+  verbose=True
+)

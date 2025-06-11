@@ -15,7 +15,8 @@ from .tools.static_analysis import (
     search_pattern_in_file,
     list_functions_in_file,
     find_taints_in_file,
-    read_file_content
+    read_file_content,
+    get_project_type_and_tech_stack
 )
 
 console = Console()
@@ -214,6 +215,16 @@ class ToolHandler:
         console.print(f"**[Tool Call]** `search_codebase(regex_pattern='{regex_pattern}')`")
         return search_codebase(str(self.codebase_path), regex_pattern)
 
+    def handle_get_project_type(self) -> str:
+        """
+        Handler for analyzing the project type and technology stack.
+        
+        Returns:
+            Project type and technology analysis
+        """
+        console.print(f"**[Tool Call]** `get_project_type()`")
+        return get_project_type_and_tech_stack(str(self.codebase_path))
+
     def get_all_tool_definitions(self) -> list[types.FunctionDeclaration]:
         """
         Returns the list of FunctionDeclaration objects for the Gemini API.
@@ -303,6 +314,13 @@ class ToolHandler:
                     required=["regex_pattern"]
                 )
             ),
+            
+            # --- Project Comprehension Tool ---
+            types.FunctionDeclaration(
+                name="get_project_type",
+                description="PHASE 1 MANDATORY TOOL: Analyzes key manifest files (e.g., package.json, AndroidManifest.xml, requirements.txt) to identify the project type and technology stack. This should be one of the first tools you use to understand what kind of project you're analyzing.",
+                parameters=types.Schema(type=types.Type.OBJECT, properties={})  # No parameters needed
+            ),
         ]
 
     def get_tool_map(self) -> dict[str, callable]:
@@ -323,4 +341,7 @@ class ToolHandler:
             "list_functions": self.handle_list_functions,
             "find_taint_sources_and_sinks": self.handle_find_taint_sources_and_sinks,
             "search_codebase": self.handle_search_codebase,
+            
+            # Project comprehension tool
+            "get_project_type": self.handle_get_project_type,
         }

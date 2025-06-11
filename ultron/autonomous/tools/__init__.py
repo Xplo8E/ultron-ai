@@ -11,7 +11,8 @@ from .static_analysis import (
     search_pattern_in_file,
     list_functions_in_file,
     find_taints_in_file,
-    read_file_content
+    read_file_content,
+    get_project_type_and_tech_stack
 )
 
 __all__ = [
@@ -22,5 +23,6 @@ __all__ = [
     'search_pattern_in_file',
     'list_functions_in_file',
     'find_taints_in_file',
-    'read_file_content'
+    'read_file_content',
+    'get_project_type_and_tech_stack'
 ] 

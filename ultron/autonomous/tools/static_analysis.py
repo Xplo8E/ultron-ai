@@ -158,4 +158,180 @@ def read_file_content(file_path: str) -> str:
         with open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
             return f.read()
     except Exception as e:
-        return f"Error: Could not read file '{file_path}'. Reason: {e}" 
+        return f"Error: Could not read file '{file_path}'. Reason: {e}"
+
+def get_project_type_and_tech_stack(root_path: str) -> str:
+    """
+    Analyzes key files to determine the project's type and technology stack.
+    Returns a summary string for the agent to understand what kind of project it's analyzing.
+    
+    Args:
+        root_path: Path to the project root directory
+        
+    Returns:
+        Project type and technology summary
+    """
+    manifests = {
+        # Web Applications
+        'package.json': 'Node.js (Web/CLI)',
+        'requirements.txt': 'Python (Generic/Web)',
+        'pom.xml': 'Java (Maven)',
+        'build.gradle': 'Java/Android (Gradle)',
+        'composer.json': 'PHP (Composer)',
+        'Gemfile': 'Ruby (Bundler)',
+        'setup.py': 'Python (setuptools)',
+        'pyproject.toml': 'Python (Modern)',
+        'yarn.lock': 'Node.js (Yarn)',
+        'package-lock.json': 'Node.js (npm)',
+        
+        # Mobile Applications
+        'AndroidManifest.xml': 'Android App',
+        'app/AndroidManifest.xml': 'Android App',
+        'src/main/AndroidManifest.xml': 'Android App',
+        'Podfile': 'iOS (CocoaPods)',
+        'Package.swift': 'iOS (Swift Package Manager)',
+        'pubspec.yaml': 'Flutter/Dart',
+        
+        # Compiled Languages
+        'Makefile': 'C/C++ (or other compiled language)',
+        'CMakeLists.txt': 'C/C++ (CMake)',
+        'Cargo.toml': 'Rust',
+        'go.mod': 'Go',
+        'stack.yaml': 'Haskell (Stack)',
+        'cabal.project': 'Haskell (Cabal)',
+        
+        # Configuration/Infrastructure
+        'Dockerfile': 'Docker Container',
+        'docker-compose.yml': 'Docker Compose',
+        'main.tf': 'Terraform Infrastructure',
+        'terraform.tf': 'Terraform Infrastructure',
+        'ansible.cfg': 'Ansible Configuration',
+        'playbook.yml': 'Ansible Playbook',
+        'serverless.yml': 'Serverless Framework',
+        'netlify.toml': 'Netlify Configuration',
+        'vercel.json': 'Vercel Configuration',
+        
+        # Framework-specific
+        'manage.py': 'Django (Python Web Framework)',
+        'app.py': 'Flask (Python Web Framework)',
+        'server.js': 'Node.js Server',
+        'index.js': 'Node.js Application',
+        'webpack.config.js': 'Webpack (Build Tool)',
+        'vite.config.js': 'Vite (Build Tool)',
+        'next.config.js': 'Next.js (React Framework)',
+        'nuxt.config.js': 'Nuxt.js (Vue Framework)',
+        'angular.json': 'Angular (Web Framework)'
+    }
+    
+    found_tech = []
+    additional_info = []
+    root_path_obj = Path(root_path)
+    
+    # Check for manifest files
+    for filename, tech in manifests.items():
+        file_path = root_path_obj / filename
+        if file_path.exists():
+            found_tech.append(tech)
+            
+            # Try to extract additional information from key files
+            try:
+                if filename == 'package.json':
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        import json
+                        data = json.load(f)
+                        if 'scripts' in data and 'start' in data['scripts']:
+                            additional_info.append(f"Start command: {data['scripts']['start']}")
+                        if 'dependencies' in data:
+                            key_deps = [dep for dep in data['dependencies'].keys() 
+                                      if dep in ['express', 'react', 'vue', 'angular', 'fastify', 'koa']]
+                            if key_deps:
+                                additional_info.append(f"Key dependencies: {', '.join(key_deps)}")
+                                
+                elif filename == 'requirements.txt':
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        content = f.read()
+                        frameworks = []
+                        if 'django' in content.lower():
+                            frameworks.append('Django')
+                        if 'flask' in content.lower():
+                            frameworks.append('Flask')
+                        if 'fastapi' in content.lower():
+                            frameworks.append('FastAPI')
+                        if frameworks:
+                            additional_info.append(f"Python frameworks: {', '.join(frameworks)}")
+                            
+            except Exception:
+                # If we can't parse the file, that's fine, we'll just skip the additional info
+                pass
+    
+    # Check for common directory structures that indicate project types
+    common_dirs = {
+        'src/main/java': 'Java (Maven/Gradle structure)',
+        'app/src/main': 'Android (Standard structure)',
+        'lib': 'Library project',
+        'bin': 'Binary/Executable project',
+        'public': 'Web application (static assets)',
+        'static': 'Web application (static assets)',
+        'templates': 'Web application (templating)',
+        'migrations': 'Database-backed application',
+        'models': 'MVC-style application',
+        'controllers': 'MVC-style application',
+        'views': 'MVC-style application'
+    }
+    
+    for dir_name, tech in common_dirs.items():
+        if (root_path_obj / dir_name).is_dir():
+            found_tech.append(tech)
+    
+    # Analyze file extensions for additional clues
+    extensions = {}
+    try:
+        for file_path in root_path_obj.rglob('*'):
+            if file_path.is_file() and not file_path.name.startswith('.'):
+                ext = file_path.suffix.lower()
+                if ext:
+                    extensions[ext] = extensions.get(ext, 0) + 1
+    except Exception:
+        pass
+    
+    # Identify primary languages by file count
+    language_extensions = {
+        '.py': 'Python',
+        '.js': 'JavaScript',
+        '.ts': 'TypeScript',
+        '.java': 'Java',
+        '.kt': 'Kotlin',
+        '.cpp': 'C++',
+        '.c': 'C',
+        '.rs': 'Rust',
+        '.go': 'Go',
+        '.php': 'PHP',
+        '.rb': 'Ruby',
+        '.swift': 'Swift',
+        '.dart': 'Dart'
+    }
+    
+    primary_languages = []
+    for ext, count in sorted(extensions.items(), key=lambda x: x[1], reverse=True)[:3]:
+        if ext in language_extensions and count > 2:  # Only include if there are multiple files
+            primary_languages.append(f"{language_extensions[ext]} ({count} files)")
+    
+    # Build the final response
+    result_parts = []
+    
+    if found_tech:
+        unique_tech = list(dict.fromkeys(found_tech))  # Remove duplicates while preserving order
+        result_parts.append(f"**Detected Project Types:** {', '.join(unique_tech)}")
+    else:
+        result_parts.append("**Project Type:** Could not automatically determine from manifest files")
+    
+    if primary_languages:
+        result_parts.append(f"**Primary Languages:** {', '.join(primary_languages)}")
+    
+    if additional_info:
+        result_parts.append(f"**Additional Info:** {', '.join(additional_info)}")
+    
+    if not found_tech and not primary_languages:
+        result_parts.append("\n**Recommendation:** Use 'execute_shell_command' with 'ls -la' and 'find . -name \"*.ext\" | head -10' to investigate the project structure manually.")
+    
+    return "\n".join(result_parts) 

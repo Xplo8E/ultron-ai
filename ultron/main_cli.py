@@ -443,7 +443,10 @@ def autonomous_review_command(path, model_key, mission, verification_target, log
 
     except Exception as e:
         console.print(f"\n[bold red]❌ CRITICAL AGENT FAILURE:[/bold red] {e}")
-
+        # Print the stack trace of the error
+        import traceback
+        traceback.print_exc()
+        
 
 if __name__ == '__main__':
     cli()
