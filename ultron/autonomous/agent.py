@@ -18,7 +18,7 @@ from google.api_core import exceptions as google_exceptions
 from pprint import pformat
 
 from .config import AgentConfig
-from .prompts import get_initial_prompt
+from .prompts import get_system_instruction_template, get_workflow_section
 from .tool_handler import ToolHandler
 from .tools import get_directory_tree
 from ..core.constants import AVAILABLE_MODELS, MODELS_SUPPORTING_THINKING
@@ -32,7 +32,7 @@ class AutonomousAgent:
     configuration management to specialized components.
     """
     
-    def __init__(self, codebase_path: str, model_key: str, mission: str, verbose: bool = False, log_dir: str = "logs"):
+    def __init__(self, codebase_path: str, model_key: str, mission: str, verification_target: str | None = None, verbose: bool = False, log_dir: str = "logs"):
         """
         Initialize the autonomous agent with modular components.
         
@@ -40,6 +40,7 @@ class AutonomousAgent:
             codebase_path: Path to the codebase to analyze
             model_key: Key identifying which model to use
             mission: The specific mission or goal for the agent
+            verification_target: Optional target URL/service for dynamic verification
             verbose: Whether to enable verbose logging
             log_dir: Directory for log files
         """
@@ -53,6 +54,7 @@ class AutonomousAgent:
             codebase_path=Path(codebase_path).resolve(),
             model_key=model_key,
             mission=mission,
+            verification_target=verification_target,
             log_file_path=log_file,
             verbose=verbose
         )
@@ -102,16 +104,27 @@ class AutonomousAgent:
             style="blue"
         ))
         
-        # Generate the directory tree for the prompt
+        # Generate the directory tree (now much more efficient)
         directory_tree = get_directory_tree(str(self.config.codebase_path))
         
-        # Create the initial system prompt
-        initial_prompt = get_initial_prompt(self.config.mission, directory_tree)
-        self._log(f"\n--- Initial Prompt ---\n{initial_prompt}")
+        # Create the system instruction (static context)
+        system_instruction_template = get_system_instruction_template()
+        workflow_section = get_workflow_section(self.config.verification_target)
         
-        # Initialize conversation history
+        system_instruction_content = system_instruction_template.format(
+            workflow_section=workflow_section,
+            directory_tree=directory_tree
+        )
+        
+        # Create the first user message (dynamic context)
+        initial_user_message = f"My mission is to: {self.config.mission}. Begin your analysis."
+        
+        self._log(f"\n--- System Instruction ---\n{system_instruction_content}")
+        self._log(f"\n--- Initial User Message ---\n{initial_user_message}")
+        
+        # Initialize conversation history with just the user message
         chat_history = [
-            types.Content(role="user", parts=[types.Part(text=initial_prompt)])
+            types.Content(role="user", parts=[types.Part(text=initial_user_message)])
         ]
         
         final_report = None
@@ -157,6 +170,7 @@ class AutonomousAgent:
                 "top_k": 20,
                 "top_p": 0.8,
                 "max_output_tokens": 8192,
+                "system_instruction": system_instruction_content,
             }
             if self.supports_thinking:
                 config_args["thinking_config"] = types.ThinkingConfig(
@@ -247,7 +261,7 @@ class AutonomousAgent:
         
         Args:
             chat_history: The conversation history
-            config: API configuration
+            config: API configuration (includes system_instruction)
             max_retries: Maximum number of retry attempts
             
         Returns:

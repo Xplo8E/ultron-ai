@@ -17,6 +17,7 @@ class AgentConfig:
     model_key: str
     mission: str
     log_file_path: Path
+    verification_target: str | None = None  # New parameter for dynamic verification mode
     verbose: bool = False
     
     def __str__(self) -> str:
@@ -26,6 +27,7 @@ class AgentConfig:
             f"  codebase_path={self.codebase_path}\n"
             f"  model_key={self.model_key}\n"
             f"  mission={self.mission}\n"
+            f"  verification_target={self.verification_target}\n"
             f"  log_file_path={self.log_file_path}\n"
             f"  verbose={self.verbose}\n"
             f")"

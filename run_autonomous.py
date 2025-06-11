@@ -15,6 +15,7 @@ import argparse
 import os
 import sys
 from pathlib import Path
+from datetime import datetime
 
 def main():
     parser = argparse.ArgumentParser(
@@ -22,14 +23,17 @@ def main():
         formatter_class=argparse.RawTextHelpFormatter,
         epilog="""
 Examples:
-  # Analyze a C project with pre-compiled binary
+  # Static analysis mode (default) - produces PoC without running it
   python run_autonomous.py --target ./vulnerable_app --mission "Find buffer overflow in the compiled binary"
   
-  # Analyze a Python web application
-  python run_autonomous.py --target ./flask_app --mission "Find SQL injection vulnerabilities"
+  # Dynamic verification mode - tests PoCs against live target
+  python run_autonomous.py --target ./flask_app --mission "Find SQL injection vulnerabilities" --verification-target http://localhost:5000
   
-  # Use a specific model with verbose output
-  python run_autonomous.py --target ./my_code --mission "Security audit" --model-key flash-8b --verbose
+  # Static analysis with verbose output
+  python run_autonomous.py --target ./my_code --mission "Security audit" --model-key 2.0-flash --verbose
+  
+  # Dynamic mode with network access for testing
+  python run_autonomous.py --target ./api_server --mission "Find authentication bypass" --verification-target https://api.example.com --verbose
         """
     )
     parser.add_argument(
@@ -44,6 +48,12 @@ Examples:
         required=True,
         help="A clear, high-level mission objective for the agent.\n"
              "Be specific about what vulnerabilities to look for and what to test."
+    )
+    parser.add_argument(
+        "--verification-target",
+        help="Optional target URL/service for dynamic verification mode.\n"
+             "If provided, the agent will attempt to verify its findings against this live target.\n"
+             "Example: --verification-target http://localhost:8080"
     )
     parser.add_argument(
         "--model-key",
@@ -76,6 +86,12 @@ Examples:
         help="Enable complete network isolation for maximum security.\n"
              "WARNING: This will prevent the agent from downloading dependencies."
     )
+    parser.add_argument(
+        "--apt-packages",
+        default="",
+        help="A space-separated string of additional apt packages to install in the image.\n"
+             "Example: --apt-packages \"gdb cmake netcat-traditional\""
+    )
     args = parser.parse_args()
 
     # Validate environment
@@ -88,7 +104,14 @@ Examples:
         print("    This may take 3-5 minutes on first run (installing packages)...")
         print("    Subsequent builds will be much faster (cached layers)...")
         
-        build_command = ["docker", "build", "-t", args.image_name, "."]
+        # --- The build command now includes the --build-arg ---
+        build_command = [
+            "docker", "build",
+            # Pass the list of extra packages to the Dockerfile
+            "--build-arg", f"EXTRA_APT_PACKAGES={args.apt_packages}",
+            "-t", args.image_name,
+            "."
+        ]
         try:
             # Stream the build output in real-time
             print("📦 Docker build progress:")
@@ -116,39 +139,57 @@ Examples:
         print(f"⏭️  Skipping Docker build, using existing image '{args.image_name}'")
 
     # --- 2. Validate Target Directory ---
-    host_target_path = Path(args.target).resolve()
+    host_target_path = Path(args.target).expanduser().resolve()
     if not host_target_path.is_dir():
         print(f"❌ Error: The target path '{host_target_path}' is not a valid directory.")
         return 1
 
-    # --- 3. Prepare Docker Run Command ---
-    print("\n🚀 Preparing to launch the agent in a sandboxed container...")
+    # --- 3. Define Host and Container Paths Explicitly ---
     
-    # Define the fixed workspace path inside the container
+    # Path on your actual computer (the host)
+    # This creates an 'agent_runs' directory where you run the script.
+    host_run_dir = Path.cwd() / f"agent_runs/{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+    host_logs_dir = host_run_dir / "logs"
+    host_pocs_dir = host_run_dir / "pocs_output"
+    host_logs_dir.mkdir(parents=True, exist_ok=True)
+    host_pocs_dir.mkdir(exist_ok=True)
+
+    # Corresponding paths INSIDE the container
     container_workspace_path = "/workspace"
+    container_logs_path = "/agent/logs"  # This is a fixed path inside the container
+
+    print(f"[*] Agent run data will be saved to: {host_run_dir.resolve()}")
+
+    # --- 4. Prepare Docker Run Command ---
+    print("\n🚀 Preparing to launch the agent in a sandboxed container...")
     
     # Construct the `docker run` command
     docker_command = [
         "docker", "run",
         "--rm",                 # Automatically remove the container when it exits
-        "--interactive",        # Keep STDIN open
-        "--tty",               # Allocate a pseudo-TTY for colored output
-        "--cap-drop=ALL",       # Crucial security: drop all Linux capabilities
+        "-it",                  # Interactive TTY to see the agent's output live
+        
+        "--privileged",
+        
+        # --- Existing security flags ---
+        "--cap-drop=ALL",       # It's still good practice to drop capabilities
         "--read-only",          # Make the container filesystem read-only
         "--tmpfs", "/tmp:size=100M,noexec,nosuid,nodev",      # Allow temporary files in /tmp
         "--tmpfs", "/root/.cache/ultron:size=50M,uid=0,gid=0",  # Cache directory for agent
         "--tmpfs", "/workspace/.ultron_temp:size=50M,uid=0,gid=0",  # Temp space for agent
-        "--tmpfs", "/agent/logs:size=10M,uid=0,gid=0",  # Writable logs directory
         
-        # Mount the user's target directory into the container's workspace
-        "-v", f"{host_target_path}:{container_workspace_path}",
+        # Mount 1: The target codebase (read-only is safer)
+        "-v", f"{host_target_path}:{container_workspace_path}:ro",
         
-        # Pass the Gemini API key securely from the host environment
+        # Mount 2: The logs directory (this is the key fix)
+        # It links your host's log folder to the container's log folder.
+        "-v", f"{host_logs_dir.resolve()}:{container_logs_path}",
+        
+        # (Optional but recommended) Mount a folder for PoCs
+        "-v", f"{host_pocs_dir.resolve()}:{container_workspace_path}/pocs",
+        
+        # Pass the API key securely from the host's environment
         "-e", f"GEMINI_API_KEY={os.getenv('GEMINI_API_KEY', '')}",
-        
-        # Set resource limits for additional safety
-        "--memory=2g",          # Limit memory usage
-        "--cpus=2.0",           # Limit CPU usage
         
         args.image_name,        # The Docker image to use
         
@@ -157,16 +198,22 @@ Examples:
         "--path", container_workspace_path,
         "--mission", args.mission,
         "--model-key", args.model_key,
+        
+        # --- CRITICAL: Tell the agent where to put its logs INSIDE the container ---
+        "--log-dir", container_logs_path,
     ]
+    
+    # Add verification target if provided
+    if args.verification_target:
+        docker_command.extend(["--verification-target", args.verification_target])
     
     # Add network isolation if requested
     if args.network_isolation:
         docker_command.extend(["--network", "none"])
         print("🔒 Network isolation enabled - container will have no internet access")
     
-    # Add verbose flag if requested
     if args.verbose:
-        docker_command.append("-verbose")
+        docker_command.append("--verbose")
     
     # Build the ultron command display (for user reference)
     ultron_command_parts = [
@@ -175,6 +222,9 @@ Examples:
         "--mission", args.mission,
         "--model-key", args.model_key,
     ]
+    
+    if args.verification_target:
+        ultron_command_parts.extend(["--verification-target", args.verification_target])
     
     if args.verbose:
         ultron_command_parts.append("-verbose")
@@ -187,6 +237,9 @@ Examples:
     print(f"    CONTAINER PATH: {container_workspace_path}")
     print(f"\n🎯 Mission: '{args.mission}'")
     print(f"🤖 Model: {args.model_key}")
+    if args.verification_target:
+        print(f"🔗 Verification Target: {args.verification_target}")
+        print("   ⚡ DYNAMIC MODE: Agent will attempt live verification")
     print(f"\n⚡ Ultron Command (inside container):")
     print(f"    {ultron_command_display}")
     

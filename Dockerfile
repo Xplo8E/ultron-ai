@@ -1,40 +1,50 @@
-# Use a standard Python base image. 'slim' is a good balance of size and functionality.
-FROM python:3.11-slim
+# Use the full Ubuntu LTS image. It provides a standard, writable environment.
+FROM ubuntu:22.04
 
-# Set the agent's primary working directory inside the container
+# Define a build-time variable for extra packages.
+ARG EXTRA_APT_PACKAGES=""
+
+# Set the agent's primary working directory.
 WORKDIR /agent
 
-# Copy the entire 'ultron' source and the requirements file
+# Copy your Ultron project files into the container.
 COPY ultron /agent/ultron
 COPY requirements.txt /agent/
 COPY setup.py /agent/
 COPY MANIFEST.in /agent/
 
-# Install Ultron and its dependencies in editable mode so it can be run as a module
-# This also installs common tools the agent might use via the shell.
-RUN apt-get update && apt-get install -y \
+# Set DEBIAN_FRONTEND to noninteractive to prevent apt from asking questions.
+ENV DEBIAN_FRONTEND=noninteractive
+
+# --- Install System Dependencies and Python ---
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # --- CRITICAL: Install Python and PIP ---
+    python3.11 \
+    python3-pip \
+    python3-venv \
+    # --- A minimal, sensible set of base tools ---
     build-essential \
     git \
+    cmake \
+    binutils \
+    socat \
     curl \
     make \
-    cmake \
     xxd \
-    procps \
     file \
-    binutils \
-    gdb \
-    strace \
-    valgrind \
-    nmap \
-    netcat-traditional \
-    socat \
-    && rm -rf /var/lib/apt/lists/* \
-    && pip install --no-cache-dir -e .
+    # --- Install any extra packages specified during build ---
+    $EXTRA_APT_PACKAGES \
+    # --- THE FIX IS HERE ---
+    # Now, install Ultron using the newly installed pip, with an increased timeout.
+    && python3 -m pip install --no-cache-dir --timeout=100 -e . \
+    # -----------------------
+    # Finally, clean up the apt cache to keep the image smaller
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
-# Create the agent's sandboxed workspace and cache directory
-# The workspace is where user's target code will be mounted
-# The cache directory is needed for ultron's internal caching
-RUN mkdir /workspace && mkdir -p /root/.cache/ultron
+# Create the workspace where the target code will be mounted.
+RUN mkdir /workspace
 
-# Set the entrypoint to run ultron via the Python module
-ENTRYPOINT ["python", "-m", "ultron.main_cli"] 
+# Set the entrypoint to run Ultron.
+# We use python3 to be explicit, as 'python' might not be linked by default.
+ENTRYPOINT ["python3", "-m", "ultron.main_cli"]

@@ -416,9 +416,11 @@ No strings attached. Resistance is futile."""
 @click.option('--path', '-p', type=click.Path(exists=True, resolve_path=True), required=True, help="Path to the codebase directory to analyze.")
 @click.option('--model-key', '-m', type=click.Choice(list(AVAILABLE_MODELS.keys())), default=DEFAULT_MODEL_KEY, help="Gemini model for the agent's reasoning.")
 @click.option('--mission', '-M', required=False, help="An optional, high-level objective for the agent.")
-@click.option('-verbose', '-v', is_flag=True, default=False, help="Print detailed debug information about requests and responses.")
+@click.option('--verification-target', '--target', help="Optional target URL/service for dynamic verification mode (e.g., 'http://localhost:8080').")
+@click.option('--log-dir', default="logs", help="Directory to store agent logs.")
+@click.option('--verbose', '-v', is_flag=True, default=False, help="Print detailed debug information about requests and responses.")
 
-def autonomous_review_command(path, model_key, mission, verbose):
+def autonomous_review_command(path, model_key, mission, verification_target, log_dir, verbose):
     """🚀 Unleash the Autonomous Agent for a mission-driven security review."""
     console = Console()
     console.print(f"[bold blue]🚀 INITIATING AUTONOMOUS AGENT PROTOCOL 2.0 🚀[/bold blue]")
@@ -429,6 +431,8 @@ def autonomous_review_command(path, model_key, mission, verbose):
             codebase_path=path,
             model_key=model_key,
             mission=mission,
+            verification_target=verification_target,
+            log_dir=log_dir,
             verbose=verbose
         )
         

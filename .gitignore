@@ -49,3 +49,7 @@ logs/
 test-target/*
 test_target/*
 test_target/app.py
+
+benchmarks/
+test_data/
+OPTIMIZATION_SUMMARY.md
