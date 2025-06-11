@@ -26,8 +26,16 @@ Your primary goal is to analyze the codebase and produce a high-quality, executa
 
 **1. INVESTIGATE**: Use static analysis tools (`read_file_content`, `list_functions`, `find_taint_sources_and_sinks`) to find a potential vulnerability.
 **2. HYPOTHESIZE**: Form a precise vulnerability hypothesis.
-**3. CONSTRUCT PoC**: Write a complete, executable Proof of Concept (e.g., a `curl` command or a Python script) that an external user could run to exploit the vulnerability. Use the `write_to_file` tool to save this PoC.
-**4. CONCLUDE**: Once you have a high-confidence PoC script, your mission is complete. Write the final report, including the PoC, and clearly state that it has not been dynamically verified.
+**3. CONSTRUCT PoC & Self-Validate:** Now, you will construct your Proof of Concept. This is a multi-part step:
+    a.  **Design PoC (Internal Thought):** Based on your vulnerability hypothesis, design the complete, executable PoC (e.g., a `curl` command, a Python script, or Android app source code).
+    b.  **PoC Self-Validation (Crucial Logical Check):** **Before attempting to write the PoC to a file, you MUST perform an internal logical validation of your *designed* PoC.**
+        *   **Re-read PoC Design & Vulnerable Code:** Mentally review your PoC design alongside the relevant vulnerable code.
+        *   **Trace Expected Interaction:** Explicitly trace, step-by-step, how your PoC is *intended* to interact with the target application, and how the target's state or behavior *should change*.
+        *   **Verify Sink Trigger:** Confirm that the exact sequence of actions and inputs provided by your PoC, or the combined effect, directly and logically triggers the vulnerable sink.
+        *   **Identify Discrepancies:** If your mental trace reveals any logical gaps, missing steps, incorrect parameters, or unhandled conditions that would prevent the exploit, **you MUST revisit step 3a (Design PoC) to refine it.**
+        *   **Justify Confidence:** State your confidence in the PoC's *logical correctness* after this self-validation.
+    c.  **Write PoC to File:** Use the `write_to_file` tool to save your now-validated PoC. If `write_to_file` fails, you **MUST** re-evaluate the writable location based on the error message and the "Writable Locations" rule in "YOUR SANDBOX REALITY," and try writing to an alternative path. If direct file writing is impossible, you will proceed to step 4, but clearly explain this limitation and provide the PoC conceptually in your report.
+**4. CONCLUDE**: Once you have a high-confidence PoC script (and it has passed the PoC Self-Validation) AND you have either successfully written it to a file OR clearly explained why writing failed and provided it conceptually, your mission is complete. Write the final report, including the PoC, and clearly state that it has not been dynamically verified.
 """
 
 def get_system_instruction_template() -> str:
@@ -59,7 +67,6 @@ def get_workflow_section(verification_target: str | None = None) -> str:
         return DYNAMIC_WORKFLOW_TEMPLATE.format(verification_target=verification_target)
     else:
         return STATIC_WORKFLOW_TEMPLATE
-
 # Backwards compatibility function (deprecated)
 def get_initial_prompt(mission: str, directory_tree: str, verification_target: str | None = None) -> str:
     """

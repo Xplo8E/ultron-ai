@@ -76,34 +76,32 @@ class ToolHandler:
 
     def handle_write_to_file(self, file_path: str, content: str) -> str:
         """
-        Handler for writing a file, ensuring it's within the codebase bounds.
-        
-        Args:
-            file_path: Relative path to the file to write
-            content: Content to write to the file
-            
-        Returns:
-            Success or error message
+        Handler for writing a file. It allows writing within the project codebase
+        or to a designated temporary directory (/tmp).
         """
         console.print(f"**[Tool Call]** `write_to_file(file_path='{file_path}', content_length={len(content)})`")
         
-        # Validate the path
-        absolute_path, error = self._resolve_and_validate_path(file_path)
-        if error:
-            # For file writing, we need to be more permissive since the file might not exist yet
-            # Check if it's a security error (not just "file not found")
-            if "security violation" in error.lower() or "path traversal" in error.lower():
-                return error
-                
-        # If path validation failed but it's just because the file doesn't exist,
-        # construct the safe absolute path for writing
-        if not absolute_path:
-            # Re-construct the path safely
-            if '..' not in file_path and not Path(file_path).is_absolute():
-                absolute_path = self.codebase_path / file_path
-            else:
-                return "Error: Invalid file path for writing."
+        # --- NEW LOGIC TO ALLOW WRITING TO /tmp ---
+        # Sanitize the provided path to prevent any path traversal tricks.
+        # For example, this prevents '/tmp/../etc/passwd'
+        safe_file_path = Path(file_path).resolve()
 
+        # Check if the agent is trying to write to the allowed temporary directory.
+        if str(safe_file_path).startswith('/tmp/'):
+            # If it's a safe temporary path, allow it directly.
+            absolute_path = safe_file_path
+            
+        else:
+            # Otherwise, enforce the original rule: path must be within the codebase.
+            validated_path, error = self._resolve_and_validate_path(file_path)
+            if error:
+                return error # Return the security error from the validator.
+            if not validated_path:
+                # This should ideally not be reached if validator is correct.
+                return f"Error: The path '{file_path}' is invalid or could not be resolved."
+            absolute_path = validated_path
+
+        # Proceed with the write operation using the determined safe absolute path.
         return write_to_file(str(absolute_path), content)
 
     # --- Static Analysis Tool Handlers ---
