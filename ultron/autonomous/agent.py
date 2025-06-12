@@ -89,7 +89,7 @@ class AutonomousAgent:
         with open(self.config.log_file_path, "a", encoding="utf-8") as f:
             f.write(content + "\n")
 
-    def run(self, max_turns: int = 50) -> str:
+    def run(self, max_turns: int = 100) -> str:
         """
         Main execution loop for the agent.
         
@@ -112,12 +112,13 @@ class AutonomousAgent:
         workflow_section = get_workflow_section(self.config.verification_target)
         
         system_instruction_content = system_instruction_template.format(
+            mission=self.config.mission,
             workflow_section=workflow_section,
             directory_tree=directory_tree
         )
         
         # Create the first user message (dynamic context)
-        initial_user_message = f"My mission is to: {self.config.mission}. Begin your analysis."
+        initial_user_message = f"Your mission is set. Begin your analysis now by following the PHASE 1 guidelines. \n\n**MISSION**: {self.config.mission}"
         
         self._log(f"\n--- System Instruction ---\n{system_instruction_content}")
         self._log(f"\n--- Initial User Message ---\n{initial_user_message}")
@@ -175,11 +176,11 @@ class AutonomousAgent:
             if self.supports_thinking:
                 config_args["thinking_config"] = types.ThinkingConfig(
                     include_thoughts=True,
-                    thinking_budget=3000
+                    thinking_budget=8000
                 )
-                config_args["max_output_tokens"] = 10000
-                config_args["temperature"] = 0.2
-                config_args["top_k"] = 10
+                config_args["max_output_tokens"] = 30000
+                config_args["temperature"] = 0.7
+                config_args["top_k"] = 20
                 config_args["top_p"] = 0.8
             
             config = types.GenerateContentConfig(**config_args)

@@ -17,6 +17,8 @@ You have been provided with a live target: **{verification_target}**.
 **1. INVESTIGATE**: Analyze the codebase to form a hypothesis about a vulnerability.
 **2. CONSTRUCT PoC**: Use `write_to_file` to create a test script or `execute_shell_command` with an inline command (e.g., `curl`). Your PoC must target `{verification_target}`.
 **3. VERIFY**: Execute your PoC and confirm the exploit against the live target. Analyze output for proof of vulnerability.
+
+**CRITICAL DYNAMIC-MODE RULE**: If your static analysis does not reveal a clear vulnerability, **you MUST NOT CONCLUDE with a 'No vulnerabilities found' report**. Your mission requires you to test the live application. You must pivot to a dynamic analysis phase by formulating a new hypothesis about how the live target at `{verification_target}` might be vulnerable to direct interaction. Use `execute_shell_command` with tools like `curl` or others to probe the target and test your hypothesis. Failure to find a vulnerability in the code is not mission failure; it is the signal to begin dynamic testing.
 """
 
 STATIC_WORKFLOW_TEMPLATE = """
