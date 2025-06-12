@@ -166,19 +166,21 @@ class AutonomousAgent:
             # Configure the API request
             config_args = {
                 "tools": self.tools,
-                "temperature": 0.7,
-                "top_k": 20,
-                "top_p": 0.8,
+                "temperature": 0.2,
+                "top_k": 10,
+                "top_p": 0.7,
                 "max_output_tokens": 8192,
                 "system_instruction": system_instruction_content,
             }
             if self.supports_thinking:
                 config_args["thinking_config"] = types.ThinkingConfig(
                     include_thoughts=True,
-                    thinking_budget=8000
+                    thinking_budget=3000
                 )
-            if self.config.model_key == AVAILABLE_MODELS["2.5-flash-05-20"]:
-                config_args["max_output_tokens"] = 20000
+                config_args["max_output_tokens"] = 10000
+                config_args["temperature"] = 0.2
+                config_args["top_k"] = 10
+                config_args["top_p"] = 0.8
             
             config = types.GenerateContentConfig(**config_args)
 
