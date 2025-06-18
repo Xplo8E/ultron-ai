@@ -54,7 +54,7 @@ benchmarks/
 test_data/
 OPTIMIZATION_SUMMARY.md
 
-docs/
+docs-s/
 research/
 
 logs*
