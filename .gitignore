@@ -53,3 +53,12 @@ test_target/app.py
 benchmarks/
 test_data/
 OPTIMIZATION_SUMMARY.md
+
+docs/
+research/
+
+logs*
+agent_run*
+
+
+

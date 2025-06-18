@@ -1,9 +1,0 @@
---- Ultron Run Initialized ---
-AgentConfig(
-  codebase_path=/Users/apple/projects/ultron-ai/test_data/DeepAndroid
-  model_key=2.0-flash
-  mission=Find Android vulnerabilities
-  verification_target=None
-  log_file_path=agent_runs/ultron_run_20250611_105838.log
-  verbose=True
-)
