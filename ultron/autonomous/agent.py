@@ -18,7 +18,7 @@ from google.api_core import exceptions as google_exceptions
 from pprint import pformat
 
 from .config import AgentConfig
-from .prompts import get_system_instruction_template, get_workflow_section
+from .prompts import get_system_instruction_template, get_workflow_section, get_sandbox_section
 from .tool_handler import ToolHandler
 from .tools import get_directory_tree
 from ..core.constants import AVAILABLE_MODELS, MODELS_SUPPORTING_THINKING
@@ -31,8 +31,8 @@ class AutonomousAgent:
     the conversation with the LLM while delegating tool execution and 
     configuration management to specialized components.
     """
-    
-    def __init__(self, codebase_path: str, model_key: str, mission: str, verification_target: str | None = None, verbose: bool = False, log_dir: str = "logs"):
+
+    def __init__(self, codebase_path: str, model_key: str, mission: str, verification_target: str | None = None, sandbox_mode: bool = True, verbose: bool = False, log_dir: str = "logs", max_turns: int = 50):
         """
         Initialize the autonomous agent with modular components.
         
@@ -41,6 +41,7 @@ class AutonomousAgent:
             model_key: Key identifying which model to use
             mission: The specific mission or goal for the agent
             verification_target: Optional target URL/service for dynamic verification
+            sandbox_mode: Whether to enable sandbox mode
             verbose: Whether to enable verbose logging
             log_dir: Directory for log files
         """
@@ -55,8 +56,10 @@ class AutonomousAgent:
             model_key=model_key,
             mission=mission,
             verification_target=verification_target,
+            sandbox_mode=sandbox_mode,
             log_file_path=log_file,
-            verbose=verbose
+            verbose=verbose,
+            max_turns=max_turns
         )
         
         # --- 2. Model Configuration ---
@@ -74,6 +77,12 @@ class AutonomousAgent:
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable not set.")
         
+        self.found_vulnerabilities = []
+        self.total_prompt_tokens_run = 0
+        self.total_candidates_tokens_run = 0
+        self.total_thoughts_tokens_run = 0
+        self.total_tokens_run = 0
+
         self.client = Client(api_key=api_key)
 
         # --- 5. Initial Logging ---
@@ -89,7 +98,7 @@ class AutonomousAgent:
         with open(self.config.log_file_path, "a", encoding="utf-8") as f:
             f.write(content + "\n")
 
-    def run(self, max_turns: int = 100) -> str:
+    def run(self) -> str:
         """
         Main execution loop for the agent.
         
@@ -106,15 +115,17 @@ class AutonomousAgent:
         
         # Generate the directory tree (now much more efficient)
         directory_tree = get_directory_tree(str(self.config.codebase_path))
-        
+        max_turns = self.config.max_turns
         # Create the system instruction (static context)
         system_instruction_template = get_system_instruction_template()
         workflow_section = get_workflow_section(self.config.verification_target)
-        
+        sandbox_section = get_sandbox_section(self.config.sandbox_mode)
+
         system_instruction_content = system_instruction_template.format(
             mission=self.config.mission,
             workflow_section=workflow_section,
-            directory_tree=directory_tree
+            directory_tree=directory_tree,
+            sandbox_section=sandbox_section
         )
         
         # Create the first user message (dynamic context)
@@ -206,8 +217,38 @@ class AutonomousAgent:
                 console.print(response)
                 console.print("-" * 20)
 
-            # Process the response
+            if not response.candidates:
+                # Handle the rare case of no candidates
+                console.print(Panel("⚠️ The API returned no candidates. This may be due to a prompt block. Skipping turn.", style="bold yellow"))
+                self._log("\n--- API returned no candidates. Skipping turn. ---")
+                continue # Skip to the next turn
+
             candidate = response.candidates[0]
+
+            # --- NEW: GRACEFUL HANDLING OF BLOCKED RESPONSES ---
+            if candidate.content is None:
+                finish_reason = getattr(candidate, 'finish_reason', 'UNKNOWN')
+                safety_ratings = getattr(candidate, 'safety_ratings', [])
+                
+                # Log and display the reason for the block
+                error_panel = Panel(
+                    f"🛑 Model response was blocked.\n"
+                    f"Finish Reason: [bold]{finish_reason}[/bold]\n"
+                    f"Safety Ratings: {safety_ratings}",
+                    title="[bold red]Safety Filter Triggered[/bold red]",
+                    border_style="red"
+                )
+                console.print(error_panel)
+                self._log(f"\n--- SAFETY BLOCK ---\nFinish Reason: {finish_reason}\nRatings: {safety_ratings}\n")
+
+                # Instruct the model to self-correct
+                correction_text = "Your previous response was blocked by the safety filter. You MUST re-evaluate your strategy. Do not generate content that directly resembles a dangerous exploit. Instead, describe the vulnerability conceptually and try a different tool or approach. For example, use `read_file_content` to gather more context instead of attempting a direct action."
+                chat_history.append(types.Content(role="user", parts=[types.Part(text=correction_text)]))
+                
+                continue # Skip the rest of this turn's logic and start the next loop
+
+
+            # --- Existing Logic (now safe to run) ---
             parts = candidate.content.parts
             
             all_text_parts = [p.text.strip() for p in parts if hasattr(p, 'text') and p.text and p.text.strip()]
@@ -226,39 +267,64 @@ class AutonomousAgent:
                 fn_name = fn.name
                 fn_args = {key: value for key, value in fn.args.items()}
 
-                console.print(f"**🛠️ Calling Tool:** `{fn_name}({fn_args})`")
-                self._log(f"\n--- Tool Call ---\n{fn_name}({pformat(fn_args)})")
+                # --- NEW LOGIC: Intercept the 'save_finding_and_continue' tool ---
+                if fn_name == "save_finding_and_continue":
 
-                # Execute the tool
-                tool_func = self.tool_map.get(fn_name)
-                if tool_func:
-                    result = tool_func(**fn_args)
+                    report_content = fn_args.get("report", "No report content provided.")
+                    self.found_vulnerabilities.append(report_content)
+                    console.print(Markdown("**✅ Finding saved!** Ultron will now continue searching for more vulnerabilities."))
+                    self._log(f"\n--- VULNERABILITY FINDING SAVED ---\n{report_content}")
+                    
+                    result = "Your finding has been saved. You MUST now continue your analysis to find other, different vulnerabilities. Do not report the same finding again. Form a new hypothesis and call a new tool."
+                    tool_response_part = types.Part.from_function_response(name=fn_name, response={"result": result})
+
                 else:
-                    result = f"Tool {fn_name} not found."
 
-                console.print(Markdown(f"**🔬 Observation:**\n```\n{result}\n```"))
-                self._log(f"\n--- Tool Observation ---\n{result}")
-                
-                # Add the tool response to conversation history
-                tool_response_part = types.Part.from_function_response(name=fn_name, response={"result": result})
+                    console.print(f"**🛠️ Calling Tool:** `{fn_name}({fn_args})`")
+                    self._log(f"\n--- Tool Call ---\n{fn_name}({pformat(fn_args)})")
+
+                    # Execute the tool
+                    tool_func = self.tool_map.get(fn_name)
+                    if tool_func:
+                        result = tool_func(**fn_args)
+                    else:
+                        result = f"Tool {fn_name} not found."
+
+                    console.print(Markdown(f"**🔬 Observation:**\n```\n{result}\n```"))
+                    self._log(f"\n--- Tool Observation ---\n{result}")
+                    
+                    # Add the tool response to conversation history
+                    tool_response_part = types.Part.from_function_response(name=fn_name, response={"result": result})
+
                 chat_history.append(candidate.content)
-                chat_history.append(types.Content(role="tool", parts=[tool_response_part]))
-            
+                if tool_response_part:
+                    chat_history.append(types.Content(role="tool", parts=[tool_response_part]))
+                
             else:
-                # No tool call means the agent is concluding
-                console.print(Markdown("**✅ Agent has concluded its investigation.**"))
-                if len(all_text_parts) > 1:
-                    final_report = all_text_parts[-1]
-                elif all_text_parts:
-                    final_report = all_text_parts[0]
-                else:
-                    final_report = "Agent finished without a textual report."
-                break
+                # This case (no tool call) is now unexpected. Prompt the agent to continue.
+                console.print(Markdown("**⚠️ Agent did not call a tool as required. Prompting to continue.**"))
+                self._log("\n--- AGENT STALLED: No tool call detected. Injecting prompt to continue. ---")
+                
+                # Add the agent's (flawed) response to history
+                chat_history.append(candidate.content)
+                # Add a new user message to steer the agent back on track
+                no_tool_response = types.Content(role="user", parts=[types.Part(text="You MUST end every turn with a tool call. Please continue your analysis by forming a hypothesis and calling a tool, or use 'save_finding_and_continue' if you have a complete report.")])
+                chat_history.append(no_tool_response)
 
-        # Log and return the final report
-        final_report_text = final_report or "Agent reached maximum turns without providing a final report."
-        self._log(f"\n\n{'='*20} FINAL REPORT {'='*20}\n{final_report_text}")
-        return final_report_text
+        # --- NEW LOGIC: Generate the final consolidated report AFTER the loop finishes ---
+        console.print(Panel("🏁 **ANALYSIS COMPLETE** 🏁", style="bold green", padding=(0, 1)))
+        
+        if not self.found_vulnerabilities:
+            final_summary = "# ULTRON-AI Security Analysis Conclusion\n\n**Status:** No high-confidence, practically exploitable vulnerabilities identified after the analysis."
+        else:
+            vuln_count = len(self.found_vulnerabilities)
+            header = f"# ULTRON-AI Final Security Summary\n\nFound **{vuln_count}** vulnerabilities during this session.\n\n"
+            # Join all the individual markdown reports with a separator
+            all_reports = "\n\n---\n\n".join(self.found_vulnerabilities)
+            final_summary = header + all_reports
+
+        self._log(f"\n\n{'='*20} FINAL SUMMARY {'='*20}\n{final_summary}")
+        return final_summary
     
     def _make_api_request(self, chat_history, config, max_retries: int = 3):
         """
@@ -274,6 +340,14 @@ class AutonomousAgent:
         """
         for attempt in range(max_retries):
             try:
+
+                request_token_response = self.client.models.count_tokens(
+                    model=AVAILABLE_MODELS[self.config.model_key],
+                    contents=chat_history
+                )
+                request_tokens = request_token_response.total_tokens
+                console.print(f"[dim cyan]📊 Pre-flight Check: Request contains {request_tokens} tokens.[/dim cyan]")
+
                 response = self.client.models.generate_content(
                     model=AVAILABLE_MODELS[self.config.model_key],
                     contents=chat_history,
@@ -283,6 +357,8 @@ class AutonomousAgent:
                 
             except google_exceptions.GoogleAPICallError as e:
                 error_str = str(e).upper()
+                console.print(f"[bold red]❌ An API error occurred. The failed request contained {request_tokens} tokens.[/bold red]")
+                self._log_and_display_run_totals_on_error()
                 if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
                     wait_time = 60
                     
@@ -309,7 +385,9 @@ class AutonomousAgent:
                     
             except Exception as e:
                 console.print(f"[bold red]❌ A critical unexpected error occurred: {e}[/bold red]")
+                console.print(f"[dim red]The failed request contained approx. {request_tokens} tokens.[/dim red]")
                 self._log(f"\n--- CRITICAL UNEXPECTED ERROR ---\n{e}")
+                self._log_and_display_run_totals_on_error()
                 return None
         
         return None
@@ -325,13 +403,36 @@ class AutonomousAgent:
         """
         if hasattr(response, 'usage_metadata') and response.usage_metadata:
             usage = response.usage_metadata
-            prompt_tokens = getattr(usage, 'prompt_token_count', 0)
-            output_tokens = getattr(usage, 'candidates_token_count', 0)
-            thought_tokens = getattr(usage, 'thoughts_token_count', 0)
-            total_tokens = getattr(usage, 'total_token_count', 0)
+            prompt_tokens = getattr(usage, 'prompt_token_count', 0) or 0
+            output_tokens = getattr(usage, 'candidates_token_count', 0) or 0
+            thought_tokens = getattr(usage, 'thoughts_token_count', 0) or 0
+            total_tokens = getattr(usage, 'total_token_count', 0) or 0
             
+            # --- NEW: Update the running totals for the session ---
+            self.total_prompt_tokens_run += prompt_tokens
+            self.total_candidates_tokens_run += output_tokens
+            self.total_thoughts_tokens_run += thought_tokens
+            self.total_tokens_run += total_tokens
+            
+            # MODIFIED: Update the panel to include the running total
             token_text = Text(
-                f"📊 Tokens: Prompt={prompt_tokens} | Output={output_tokens} | Thoughts={thought_tokens} | Total={total_tokens} | Model: {self.config.model_key} | Supports Thinking: {self.supports_thinking} | Turn: {turn}/{max_turns}", 
+                f"📊 Turn: Prompt={prompt_tokens} | Output={output_tokens} | Thoughts={thought_tokens} | Total={total_tokens} | cumulatively: Total={self.total_tokens_run} | Model: {self.config.model_key} | Supports Thinking: {self.supports_thinking} | Turn: {turn}/{max_turns}",
                 style="dim cyan"
             )
             console.print(Panel(token_text, style="dim blue", padding=(0, 1))) 
+
+    def _log_and_display_run_totals_on_error(self):
+        """
+        Logs and prints the cumulative token usage for the run, intended for use on error.
+        """
+        error_summary = (
+            f"**Cumulative Token Usage Summary (at time of error):**\n"
+            f"- Total Prompt Tokens: {self.total_prompt_tokens_run}\n"
+            f"- Total Output (Candidates) Tokens: {self.total_candidates_tokens_run}\n"
+            f"- Total Thoughts Tokens: {self.total_thoughts_tokens_run}\n"
+            f"- **Grand Total for Run:** {self.total_tokens_run}"
+        )
+        
+        panel_text = Text(error_summary, style="bold yellow")
+        console.print(Panel(panel_text, title="[yellow]Run Token Summary[/yellow]", border_style="yellow"))
+        self._log(f"\n--- CUMULATIVE TOKEN USAGE ON ERROR ---\n{error_summary}")

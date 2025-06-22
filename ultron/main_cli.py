@@ -4,6 +4,8 @@ import sys
 import os
 import json
 from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any, Union
 
@@ -414,13 +416,15 @@ No strings attached. Resistance is futile."""
 
 @cli.command("autonomous-review")
 @click.option('--path', '-p', type=click.Path(exists=True, resolve_path=True), required=True, help="Path to the codebase directory to analyze.")
-@click.option('--model-key', '-m', type=click.Choice(list(AVAILABLE_MODELS.keys())), default=DEFAULT_MODEL_KEY, help="Gemini model for the agent's reasoning.")
+@click.option('--model-key', '-m', type=click.Choice(list(AVAILABLE_MODELS.keys())), default=DEFAULT_MODEL_KEY, show_default=True, help="Gemini model for the agent's reasoning.")
 @click.option('--mission', '-M', required=False, help="An optional, high-level objective for the agent.")
-@click.option('--verification-target', '--target', help="Optional target URL/service for dynamic verification mode (e.g., 'http://localhost:8080').")
-@click.option('--log-dir', default="logs", help="Directory to store agent logs.")
-@click.option('--verbose', '-v', is_flag=True, default=False, help="Print detailed debug information about requests and responses.")
+@click.option('--verification-target', '-t', help="Optional target URL/service for dynamic verification mode (e.g., 'http://localhost:8080').")
+@click.option('--log-dir', '-o', default="logs", show_default=True, help="Directory to store agent logs.")
+@click.option('--verbose', '-v', is_flag=True, default=False, show_default=True, help="Print detailed debug information about requests and responses.")
+@click.option('--sandbox-mode', '-s', is_flag=True, default=False, show_default=True, help="Enable sandbox mode for the agent to run in a controlled environment.")
+@click.option('--max-turns', '-mt', type=int, default=50, show_default=True, help="Maximum number of turns for the agent to run before stopping.")
 
-def autonomous_review_command(path, model_key, mission, verification_target, log_dir, verbose):
+def autonomous_review_command(path, model_key, mission, verification_target, log_dir, verbose, sandbox_mode, max_turns):
     """🚀 Unleash the Autonomous Agent for a mission-driven security review."""
     console = Console()
     console.print(f"[bold blue]🚀 INITIATING AUTONOMOUS AGENT PROTOCOL 2.0 🚀[/bold blue]")
@@ -433,13 +437,17 @@ def autonomous_review_command(path, model_key, mission, verification_target, log
             mission=mission,
             verification_target=verification_target,
             log_dir=log_dir,
-            verbose=verbose
+            verbose=verbose,
+            sandbox_mode=sandbox_mode,
+            max_turns=max_turns
         )
         
         final_report = agent.run()
         
-        # console.print("\n\n================ FINAL REPORT ================\n")
-        # console.print(final_report)
+        # This code is responsible for printing the consolidated report
+        console.print(Panel("[bold blue]📄 FINAL CONSOLIDATED REPORT 📄[/bold blue]"))
+        
+        console.print(Markdown(final_report, code_theme="lightbulb"))
 
     except Exception as e:
         console.print(f"\n[bold red]❌ CRITICAL AGENT FAILURE:[/bold red] {e}")

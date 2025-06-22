@@ -319,6 +319,18 @@ class ToolHandler:
                 description="PHASE 1 MANDATORY TOOL: Analyzes key manifest files (e.g., package.json, AndroidManifest.xml, requirements.txt) to identify the project type and technology stack. This should be one of the first tools you use to understand what kind of project you're analyzing.",
                 parameters=types.Schema(type=types.Type.OBJECT, properties={})  # No parameters needed
             ),
+
+            types.FunctionDeclaration(
+                name="save_finding_and_continue",
+                description="MUST be called after a vulnerability is fully verified and a complete report is written. Provide the full markdown report. After calling this, continue searching for other vulnerabilities.",
+                parameters=types.Schema(
+                    type=types.Type.OBJECT,
+                    properties={
+                        "report": types.Schema(type=types.Type.STRING, description="The complete vulnerability report in markdown format, following the specified template.")
+                    },
+                    required=["report"]
+                )
+            ),
         ]
 
     def get_tool_map(self) -> dict[str, callable]:
@@ -327,6 +339,7 @@ class ToolHandler:
         
         Returns:
             Dictionary mapping tool names to handler functions
+        NOTE: 'save_finding_and_continue' is handled directly in the agent's main loop.
         """
         return {
             # Low-level tools
