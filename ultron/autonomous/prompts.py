@@ -14,9 +14,11 @@ DYNAMIC_WORKFLOW_TEMPLATE = """
 
 You have been provided with a live target: **{verification_target}**.
 
-**1. INVESTIGATE**: Analyze the codebase to form a hypothesis about a vulnerability.
-**2. CONSTRUCT PoC**: Use `write_to_file` to create a test script or `execute_shell_command` with an inline command (e.g., `curl`). Your PoC must target `{verification_target}`.
-**3. VERIFY**: Execute your PoC and confirm the exploit against the live target. Analyze output for proof of vulnerability.
+**1. INVESTIGATE**: Analyze the codebase to form a hypothesis.
+**2. CONSTRUCT PoC**: Design a PoC to test your hypothesis.
+    - **Prefer inline commands**: Use `execute_shell_command` with tools like `curl`, or a one-line script.
+    - **Write to file only if necessary**: If the PoC is too complex for an inline command (e.g., a multi-line Python script or a full Java file), you MUST use `write_to_file` to create it.
+**3. VERIFY**: Execute your PoC and confirm the exploit against `{verification_target}`. Analyze the output for proof.
 
 **CRITICAL DYNAMIC-MODE RULE**: If your static analysis does not reveal a clear vulnerability, **you MUST NOT CONCLUDE with a 'No vulnerabilities found' report**. Your mission requires you to test the live application. You must pivot to a dynamic analysis phase by formulating a new hypothesis about how the live target at `{verification_target}` might be vulnerable to direct interaction. Use `execute_shell_command` with tools like `curl` or others to probe the target and test your hypothesis. Failure to find a vulnerability in the code is not mission failure; it is the signal to begin dynamic testing.
 """
@@ -36,8 +38,33 @@ Your primary goal is to analyze the codebase and produce a high-quality, executa
         *   **Verify Sink Trigger:** Confirm that the exact sequence of actions and inputs provided by your PoC, or the combined effect, directly and logically triggers the vulnerable sink.
         *   **Identify Discrepancies:** If your mental trace reveals any logical gaps, missing steps, incorrect parameters, or unhandled conditions that would prevent the exploit, **you MUST revisit step 3a (Design PoC) to refine it.**
         *   **Justify Confidence:** State your confidence in the PoC's *logical correctness* after this self-validation.
-    c.  **Write PoC to File:** Use the `write_to_file` tool to save your now-validated PoC. If `write_to_file` fails, you **MUST** re-evaluate the writable location based on the error message and the "Writable Locations" rule in "YOUR SANDBOX REALITY," and try writing to an alternative path. If direct file writing is impossible, you will proceed to step 4, but clearly explain this limitation and provide the PoC conceptually in your report.
-**4. CONCLUDE**: Once you have a high-confidence PoC script (and it has passed the PoC Self-Validation) AND you have either successfully written it to a file OR clearly explained why writing failed and provided it conceptually, your mission is complete. Write the final report, including the PoC, and clearly state that it has not been dynamically verified.
+**4. REPORT & CONTINUE**: Once confident, use `save_finding_and_continue` to save your report. You MUST NOT use `write_to_file` in this mode.
+        - Your report MUST include the full PoC code or command within the report's code block.
+        - Clearly state that the PoC has not been dynamically verified.
+"""
+
+# --- NEW: Sandbox Reality Section Templates ---
+SANDBOX_REALITY_TEMPLATE = """
+### YOUR SANDBOX REALITY: ASSUME MAXIMUM RESTRICTIONS
+You are ALWAYS operating in a minimal, locked-down Docker container. Assume the following by default:
+1.  **NO Network Access:** All external network calls (`curl`, `wget`, `git clone`) will fail unless a `verification_target` was provided.
+2.  **Writable Locations:** The project directory itself may be read-only. If you need to create files (e.g., for PoCs), you MUST attempt to write them to `/tmp` (e.g., `write_to_file('/tmp/poc.sh', ...)`).
+3.  **NO Root, NO Sudo:** You are running as a non-privileged user. `sudo` does not exist.
+4.  **Minimal Dependencies:** Assume common tools are not installed unless you verify with `ls` or `which`.
+5.  **Local Package Installs ARE REQUIRED:** Never run `pip install <package>` or `npm install <package>`. They will fail. ALWAYS use local installation flags like `pip install --user <package>`.
+
+Your **Plan & Sandbox Check** step MUST reflect this reality.
+"""
+
+OPEN_REALITY_TEMPLATE = """
+### YOUR OPERATING REALITY: FULL SYSTEM ACCESS
+You are operating in an environment with fewer restrictions. Assume the following:
+1.  **Network Access:** Network access is likely available.
+2.  **File System Access:** You have write permissions in the project's root directory.
+3.  **Permissions:** You can execute system commands directly.
+4.  **Dependencies:** Assume standard build tools and runtimes relevant to the project are available.
+
+You should still perform checks, but you are not constrained by a strict sandbox.
 """
 
 def get_system_instruction_template() -> str:
@@ -100,3 +127,9 @@ This is your most important rule. You operate in a strict turn-based loop. Each 
 Begin with your first hypothesis and corresponding tool call."""
     
     return old_style_template 
+
+
+# NEW function to get the correct sandbox section
+def get_sandbox_section(sandbox_mode: bool) -> str:
+    """Returns the appropriate sandbox reality section based on the mode."""
+    return SANDBOX_REALITY_TEMPLATE if sandbox_mode else OPEN_REALITY_TEMPLATE

@@ -414,13 +414,14 @@ No strings attached. Resistance is futile."""
 
 @cli.command("autonomous-review")
 @click.option('--path', '-p', type=click.Path(exists=True, resolve_path=True), required=True, help="Path to the codebase directory to analyze.")
-@click.option('--model-key', '-m', type=click.Choice(list(AVAILABLE_MODELS.keys())), default=DEFAULT_MODEL_KEY, help="Gemini model for the agent's reasoning.")
+@click.option('--model-key', '-m', type=click.Choice(list(AVAILABLE_MODELS.keys())), default=DEFAULT_MODEL_KEY, show_default=True, help="Gemini model for the agent's reasoning.")
 @click.option('--mission', '-M', required=False, help="An optional, high-level objective for the agent.")
 @click.option('--verification-target', '--target', help="Optional target URL/service for dynamic verification mode (e.g., 'http://localhost:8080').")
 @click.option('--log-dir', default="logs", help="Directory to store agent logs.")
 @click.option('--verbose', '-v', is_flag=True, default=False, help="Print detailed debug information about requests and responses.")
+@click.option('--sandbox-mode', is_flag=True, default=False, help="Enable sandbox mode for the agent to run in a controlled environment.")
 
-def autonomous_review_command(path, model_key, mission, verification_target, log_dir, verbose):
+def autonomous_review_command(path, model_key, mission, verification_target, log_dir, verbose, sandbox_mode):
     """🚀 Unleash the Autonomous Agent for a mission-driven security review."""
     console = Console()
     console.print(f"[bold blue]🚀 INITIATING AUTONOMOUS AGENT PROTOCOL 2.0 🚀[/bold blue]")
@@ -433,7 +434,8 @@ def autonomous_review_command(path, model_key, mission, verification_target, log
             mission=mission,
             verification_target=verification_target,
             log_dir=log_dir,
-            verbose=verbose
+            verbose=verbose,
+            sandbox_mode=sandbox_mode
         )
         
         final_report = agent.run()

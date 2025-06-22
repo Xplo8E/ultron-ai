@@ -5,16 +5,26 @@ AVAILABLE_MODELS = {
     "2.0-flash-lite": "gemini-2.0-flash-lite",             # For LLM-based context analysis
     "2.0-flash": "gemini-2.0-flash",                 # Good for the main review
     "2.5-flash-05-20": "gemini-2.5-flash-preview-05-20",  # Best free model for the agent
-    "2.5-flash-04-17": "gemini-2.5-flash-preview-04-17"  # Best free model for the agent
+    "2.5-flash-04-17": "gemini-2.5-flash-preview-04-17",  # Best free model for the agent
+        "2.5-flash": "gemini-2.5-flash",
+    "2.5-flash-lite":"gemini-2.5-flash-lite-preview-06-17",
+    "2.5-pro":"gemini-2.5-pro",
+    "2.5-pro-06-05":"gemini-2.5-pro-preview-06-05",
+    "2.5-pro-05-06":"gemini-2.5-pro-preview-05-06"
 }
 # 2.5-flash-05-20 is the best free model for the agent
 # Set the default for the main 'review' command to the best free general-purpose model
-DEFAULT_MODEL_KEY = "2.5-flash-04-17"
+DEFAULT_MODEL_KEY = "2.5-flash"
 
 # --- NEW: Set of models known to support the 'thinking' feature ---
 MODELS_SUPPORTING_THINKING = {
     "2.5-flash-05-20",
-    "2.5-flash-04-17"
+    "2.5-flash-04-17",
+    "2.5-flash",
+    "2.5-flash-lite",
+    "2.5-pro",
+    "2.5-pro-06-05",
+    "2.5-pro-05-06"
 }
 
 SUPPORTED_LANGUAGES = {

@@ -18,7 +18,7 @@ from google.api_core import exceptions as google_exceptions
 from pprint import pformat
 
 from .config import AgentConfig
-from .prompts import get_system_instruction_template, get_workflow_section
+from .prompts import get_system_instruction_template, get_workflow_section, get_sandbox_section
 from .tool_handler import ToolHandler
 from .tools import get_directory_tree
 from ..core.constants import AVAILABLE_MODELS, MODELS_SUPPORTING_THINKING
@@ -32,7 +32,7 @@ class AutonomousAgent:
     configuration management to specialized components.
     """
     
-    def __init__(self, codebase_path: str, model_key: str, mission: str, verification_target: str | None = None, verbose: bool = False, log_dir: str = "logs"):
+    def __init__(self, codebase_path: str, model_key: str, mission: str, verification_target: str | None = None, sandbox_mode: bool = True, verbose: bool = False, log_dir: str = "logs"):
         """
         Initialize the autonomous agent with modular components.
         
@@ -41,6 +41,7 @@ class AutonomousAgent:
             model_key: Key identifying which model to use
             mission: The specific mission or goal for the agent
             verification_target: Optional target URL/service for dynamic verification
+            sandbox_mode: Whether to enable sandbox mode
             verbose: Whether to enable verbose logging
             log_dir: Directory for log files
         """
@@ -55,6 +56,7 @@ class AutonomousAgent:
             model_key=model_key,
             mission=mission,
             verification_target=verification_target,
+            sandbox_mode=sandbox_mode,
             log_file_path=log_file,
             verbose=verbose
         )
@@ -74,6 +76,8 @@ class AutonomousAgent:
         if not api_key:
             raise ValueError("GEMINI_API_KEY environment variable not set.")
         
+        self.found_vulnerabilities = []
+
         self.client = Client(api_key=api_key)
 
         # --- 5. Initial Logging ---
@@ -110,11 +114,13 @@ class AutonomousAgent:
         # Create the system instruction (static context)
         system_instruction_template = get_system_instruction_template()
         workflow_section = get_workflow_section(self.config.verification_target)
-        
+        sandbox_section = get_sandbox_section(self.config.sandbox_mode)
+
         system_instruction_content = system_instruction_template.format(
             mission=self.config.mission,
             workflow_section=workflow_section,
-            directory_tree=directory_tree
+            directory_tree=directory_tree,
+            sandbox_section=sandbox_section
         )
         
         # Create the first user message (dynamic context)
@@ -226,39 +232,64 @@ class AutonomousAgent:
                 fn_name = fn.name
                 fn_args = {key: value for key, value in fn.args.items()}
 
-                console.print(f"**🛠️ Calling Tool:** `{fn_name}({fn_args})`")
-                self._log(f"\n--- Tool Call ---\n{fn_name}({pformat(fn_args)})")
+                # --- NEW LOGIC: Intercept the 'save_finding_and_continue' tool ---
+                if fn_name == "save_finding_and_continue":
 
-                # Execute the tool
-                tool_func = self.tool_map.get(fn_name)
-                if tool_func:
-                    result = tool_func(**fn_args)
+                    report_content = fn_args.get("report", "No report content provided.")
+                    self.found_vulnerabilities.append(report_content)
+                    console.print(Markdown("**✅ Finding saved!** Ultron will now continue searching for more vulnerabilities."))
+                    self._log(f"\n--- VULNERABILITY FINDING SAVED ---\n{report_content}")
+                    
+                    result = "Your finding has been saved. You MUST now continue your analysis to find other, different vulnerabilities. Do not report the same finding again. Form a new hypothesis and call a new tool."
+                    tool_response_part = types.Part.from_function_response(name=fn_name, response={"result": result})
+
                 else:
-                    result = f"Tool {fn_name} not found."
 
-                console.print(Markdown(f"**🔬 Observation:**\n```\n{result}\n```"))
-                self._log(f"\n--- Tool Observation ---\n{result}")
-                
-                # Add the tool response to conversation history
-                tool_response_part = types.Part.from_function_response(name=fn_name, response={"result": result})
+                    console.print(f"**🛠️ Calling Tool:** `{fn_name}({fn_args})`")
+                    self._log(f"\n--- Tool Call ---\n{fn_name}({pformat(fn_args)})")
+
+                    # Execute the tool
+                    tool_func = self.tool_map.get(fn_name)
+                    if tool_func:
+                        result = tool_func(**fn_args)
+                    else:
+                        result = f"Tool {fn_name} not found."
+
+                    console.print(Markdown(f"**🔬 Observation:**\n```\n{result}\n```"))
+                    self._log(f"\n--- Tool Observation ---\n{result}")
+                    
+                    # Add the tool response to conversation history
+                    tool_response_part = types.Part.from_function_response(name=fn_name, response={"result": result})
+
                 chat_history.append(candidate.content)
-                chat_history.append(types.Content(role="tool", parts=[tool_response_part]))
-            
+                if tool_response_part:
+                    chat_history.append(types.Content(role="tool", parts=[tool_response_part]))
+                
             else:
-                # No tool call means the agent is concluding
-                console.print(Markdown("**✅ Agent has concluded its investigation.**"))
-                if len(all_text_parts) > 1:
-                    final_report = all_text_parts[-1]
-                elif all_text_parts:
-                    final_report = all_text_parts[0]
-                else:
-                    final_report = "Agent finished without a textual report."
-                break
+                # This case (no tool call) is now unexpected. Prompt the agent to continue.
+                console.print(Markdown("**⚠️ Agent did not call a tool as required. Prompting to continue.**"))
+                self._log("\n--- AGENT STALLED: No tool call detected. Injecting prompt to continue. ---")
+                
+                # Add the agent's (flawed) response to history
+                chat_history.append(candidate.content)
+                # Add a new user message to steer the agent back on track
+                no_tool_response = types.Content(role="user", parts=[types.Part(text="You MUST end every turn with a tool call. Please continue your analysis by forming a hypothesis and calling a tool, or use 'save_finding_and_continue' if you have a complete report.")])
+                chat_history.append(no_tool_response)
 
-        # Log and return the final report
-        final_report_text = final_report or "Agent reached maximum turns without providing a final report."
-        self._log(f"\n\n{'='*20} FINAL REPORT {'='*20}\n{final_report_text}")
-        return final_report_text
+        # --- NEW LOGIC: Generate the final consolidated report AFTER the loop finishes ---
+        console.print(Panel("🏁 **ANALYSIS COMPLETE** 🏁", style="bold green", padding=(0, 1)))
+        
+        if not self.found_vulnerabilities:
+            final_summary = "# ULTRON-AI Security Analysis Conclusion\n\n**Status:** No high-confidence, practically exploitable vulnerabilities identified after the analysis."
+        else:
+            vuln_count = len(self.found_vulnerabilities)
+            header = f"# ULTRON-AI Final Security Summary\n\nFound **{vuln_count}** vulnerabilities during this session.\n\n"
+            # Join all the individual markdown reports with a separator
+            all_reports = "\n\n---\n\n".join(self.found_vulnerabilities)
+            final_summary = header + all_reports
+
+        self._log(f"\n\n{'='*20} FINAL SUMMARY {'='*20}\n{final_summary}")
+        return final_summary
     
     def _make_api_request(self, chat_history, config, max_retries: int = 3):
         """
