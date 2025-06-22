@@ -19,6 +19,7 @@ class AgentConfig:
     verification_target: str | None = None
     sandbox_mode: bool = False
     verbose: bool = False
+    max_turns: int = 50
     
     def __str__(self) -> str:
         """String representation for logging purposes."""
@@ -31,5 +32,6 @@ class AgentConfig:
             f"  sandbox_mode={self.sandbox_mode}\n" # NEW
             f"  log_file_path={self.log_file_path}\n"
             f"  verbose={self.verbose}\n"
+            f"  max_turns={self.max_turns}\n"
             f")"
         ) 

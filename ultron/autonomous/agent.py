@@ -31,8 +31,8 @@ class AutonomousAgent:
     the conversation with the LLM while delegating tool execution and 
     configuration management to specialized components.
     """
-    
-    def __init__(self, codebase_path: str, model_key: str, mission: str, verification_target: str | None = None, sandbox_mode: bool = True, verbose: bool = False, log_dir: str = "logs"):
+
+    def __init__(self, codebase_path: str, model_key: str, mission: str, verification_target: str | None = None, sandbox_mode: bool = True, verbose: bool = False, log_dir: str = "logs", max_turns: int = 50):
         """
         Initialize the autonomous agent with modular components.
         
@@ -58,7 +58,8 @@ class AutonomousAgent:
             verification_target=verification_target,
             sandbox_mode=sandbox_mode,
             log_file_path=log_file,
-            verbose=verbose
+            verbose=verbose,
+            max_turns=max_turns
         )
         
         # --- 2. Model Configuration ---
@@ -93,7 +94,7 @@ class AutonomousAgent:
         with open(self.config.log_file_path, "a", encoding="utf-8") as f:
             f.write(content + "\n")
 
-    def run(self, max_turns: int = 100) -> str:
+    def run(self) -> str:
         """
         Main execution loop for the agent.
         
@@ -110,7 +111,7 @@ class AutonomousAgent:
         
         # Generate the directory tree (now much more efficient)
         directory_tree = get_directory_tree(str(self.config.codebase_path))
-        
+        max_turns = self.config.max_turns
         # Create the system instruction (static context)
         system_instruction_template = get_system_instruction_template()
         workflow_section = get_workflow_section(self.config.verification_target)
