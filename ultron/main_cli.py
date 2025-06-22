@@ -4,6 +4,8 @@ import sys
 import os
 import json
 from rich.console import Console
+from rich.markdown import Markdown
+from rich.panel import Panel
 from pathlib import Path
 from typing import Optional, List, Dict, Tuple, Any, Union
 
@@ -442,8 +444,10 @@ def autonomous_review_command(path, model_key, mission, verification_target, log
         
         final_report = agent.run()
         
-        # console.print("\n\n================ FINAL REPORT ================\n")
-        # console.print(final_report)
+        # This code is responsible for printing the consolidated report
+        console.print(Panel("[bold blue]📄 FINAL CONSOLIDATED REPORT 📄[/bold blue]"))
+        
+        console.print(Markdown(final_report, code_theme="lightbulb"))
 
     except Exception as e:
         console.print(f"\n[bold red]❌ CRITICAL AGENT FAILURE:[/bold red] {e}")

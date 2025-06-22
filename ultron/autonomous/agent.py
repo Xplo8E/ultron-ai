@@ -78,6 +78,10 @@ class AutonomousAgent:
             raise ValueError("GEMINI_API_KEY environment variable not set.")
         
         self.found_vulnerabilities = []
+        self.total_prompt_tokens_run = 0
+        self.total_candidates_tokens_run = 0
+        self.total_thoughts_tokens_run = 0
+        self.total_tokens_run = 0
 
         self.client = Client(api_key=api_key)
 
@@ -213,8 +217,38 @@ class AutonomousAgent:
                 console.print(response)
                 console.print("-" * 20)
 
-            # Process the response
+            if not response.candidates:
+                # Handle the rare case of no candidates
+                console.print(Panel("⚠️ The API returned no candidates. This may be due to a prompt block. Skipping turn.", style="bold yellow"))
+                self._log("\n--- API returned no candidates. Skipping turn. ---")
+                continue # Skip to the next turn
+
             candidate = response.candidates[0]
+
+            # --- NEW: GRACEFUL HANDLING OF BLOCKED RESPONSES ---
+            if candidate.content is None:
+                finish_reason = getattr(candidate, 'finish_reason', 'UNKNOWN')
+                safety_ratings = getattr(candidate, 'safety_ratings', [])
+                
+                # Log and display the reason for the block
+                error_panel = Panel(
+                    f"🛑 Model response was blocked.\n"
+                    f"Finish Reason: [bold]{finish_reason}[/bold]\n"
+                    f"Safety Ratings: {safety_ratings}",
+                    title="[bold red]Safety Filter Triggered[/bold red]",
+                    border_style="red"
+                )
+                console.print(error_panel)
+                self._log(f"\n--- SAFETY BLOCK ---\nFinish Reason: {finish_reason}\nRatings: {safety_ratings}\n")
+
+                # Instruct the model to self-correct
+                correction_text = "Your previous response was blocked by the safety filter. You MUST re-evaluate your strategy. Do not generate content that directly resembles a dangerous exploit. Instead, describe the vulnerability conceptually and try a different tool or approach. For example, use `read_file_content` to gather more context instead of attempting a direct action."
+                chat_history.append(types.Content(role="user", parts=[types.Part(text=correction_text)]))
+                
+                continue # Skip the rest of this turn's logic and start the next loop
+
+
+            # --- Existing Logic (now safe to run) ---
             parts = candidate.content.parts
             
             all_text_parts = [p.text.strip() for p in parts if hasattr(p, 'text') and p.text and p.text.strip()]
@@ -306,6 +340,14 @@ class AutonomousAgent:
         """
         for attempt in range(max_retries):
             try:
+
+                request_token_response = self.client.models.count_tokens(
+                    model=AVAILABLE_MODELS[self.config.model_key],
+                    contents=chat_history
+                )
+                request_tokens = request_token_response.total_tokens
+                console.print(f"[dim cyan]📊 Pre-flight Check: Request contains {request_tokens} tokens.[/dim cyan]")
+
                 response = self.client.models.generate_content(
                     model=AVAILABLE_MODELS[self.config.model_key],
                     contents=chat_history,
@@ -315,6 +357,8 @@ class AutonomousAgent:
                 
             except google_exceptions.GoogleAPICallError as e:
                 error_str = str(e).upper()
+                console.print(f"[bold red]❌ An API error occurred. The failed request contained {request_tokens} tokens.[/bold red]")
+                self._log_and_display_run_totals_on_error()
                 if "RESOURCE_EXHAUSTED" in error_str or "429" in error_str:
                     wait_time = 60
                     
@@ -341,7 +385,9 @@ class AutonomousAgent:
                     
             except Exception as e:
                 console.print(f"[bold red]❌ A critical unexpected error occurred: {e}[/bold red]")
+                console.print(f"[dim red]The failed request contained approx. {request_tokens} tokens.[/dim red]")
                 self._log(f"\n--- CRITICAL UNEXPECTED ERROR ---\n{e}")
+                self._log_and_display_run_totals_on_error()
                 return None
         
         return None
@@ -357,13 +403,36 @@ class AutonomousAgent:
         """
         if hasattr(response, 'usage_metadata') and response.usage_metadata:
             usage = response.usage_metadata
-            prompt_tokens = getattr(usage, 'prompt_token_count', 0)
-            output_tokens = getattr(usage, 'candidates_token_count', 0)
-            thought_tokens = getattr(usage, 'thoughts_token_count', 0)
-            total_tokens = getattr(usage, 'total_token_count', 0)
+            prompt_tokens = getattr(usage, 'prompt_token_count', 0) or 0
+            output_tokens = getattr(usage, 'candidates_token_count', 0) or 0
+            thought_tokens = getattr(usage, 'thoughts_token_count', 0) or 0
+            total_tokens = getattr(usage, 'total_token_count', 0) or 0
             
+            # --- NEW: Update the running totals for the session ---
+            self.total_prompt_tokens_run += prompt_tokens
+            self.total_candidates_tokens_run += output_tokens
+            self.total_thoughts_tokens_run += thought_tokens
+            self.total_tokens_run += total_tokens
+            
+            # MODIFIED: Update the panel to include the running total
             token_text = Text(
-                f"📊 Tokens: Prompt={prompt_tokens} | Output={output_tokens} | Thoughts={thought_tokens} | Total={total_tokens} | Model: {self.config.model_key} | Supports Thinking: {self.supports_thinking} | Turn: {turn}/{max_turns}", 
+                f"📊 Turn: Prompt={prompt_tokens} | Output={output_tokens} | Thoughts={thought_tokens} | Total={total_tokens} | cumulatively: Total={self.total_tokens_run} | Model: {self.config.model_key} | Supports Thinking: {self.supports_thinking} | Turn: {turn}/{max_turns}",
                 style="dim cyan"
             )
             console.print(Panel(token_text, style="dim blue", padding=(0, 1))) 
+
+    def _log_and_display_run_totals_on_error(self):
+        """
+        Logs and prints the cumulative token usage for the run, intended for use on error.
+        """
+        error_summary = (
+            f"**Cumulative Token Usage Summary (at time of error):**\n"
+            f"- Total Prompt Tokens: {self.total_prompt_tokens_run}\n"
+            f"- Total Output (Candidates) Tokens: {self.total_candidates_tokens_run}\n"
+            f"- Total Thoughts Tokens: {self.total_thoughts_tokens_run}\n"
+            f"- **Grand Total for Run:** {self.total_tokens_run}"
+        )
+        
+        panel_text = Text(error_summary, style="bold yellow")
+        console.print(Panel(panel_text, title="[yellow]Run Token Summary[/yellow]", border_style="yellow"))
+        self._log(f"\n--- CUMULATIVE TOKEN USAGE ON ERROR ---\n{error_summary}")
