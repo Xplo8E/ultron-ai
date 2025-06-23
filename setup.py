@@ -7,12 +7,7 @@ def get_version():
         for line in f:
             if line.startswith('__version__'):
                 return line.split('=')[1].strip().strip('"\'')
-    return "0.1.3"  # fallback version
-
-# Read requirements
-def get_requirements():
-    with open('requirements.txt') as f:
-        return [line.strip() for line in f if line.strip() and not line.startswith('#')]
+    return "0.1.4"  # fallback version
 
 # Read README for long description
 def get_long_description():
@@ -35,10 +30,19 @@ setup(
         'Source': 'https://github.com/Xplo8E/ultron-ai',
         'Tracker': 'https://github.com/Xplo8E/ultron-ai/issues',
     },
-    license='MIT',
+    license='GPL-3.0',
     packages=find_packages(exclude=['test*', 'venv*']),
     include_package_data=True,
-    install_requires=get_requirements(),
+    install_requires=[
+    'google-genai',
+    'google-api-core',
+    'python-dotenv',
+    'click',
+    'rich',
+    'pydantic',
+    'demjson3',
+    'networkx',
+    ],
     entry_points={
         'console_scripts': [
             'ultron=ultron.main_cli:cli',
@@ -47,9 +51,11 @@ setup(
     classifiers=[
         'Development Status :: 4 - Beta',
         'Intended Audience :: Developers',
+        'Topic :: Scientific/Engineering :: Artificial Intelligence',
+        'Intended Audience :: Information Technology',
         'Topic :: Software Development :: Quality Assurance',
         'Topic :: Security',
-        'License :: OSI Approved :: MIT License',
+        'License :: OSI Approved :: GNU General Public License v3 (GPLv3)',
         'Programming Language :: Python :: 3',
         'Programming Language :: Python :: 3.10',
         'Programming Language :: Python :: 3.11',
@@ -57,7 +63,7 @@ setup(
         'Operating System :: OS Independent',
         'Environment :: Console',
     ],
-    keywords='code-analysis ai security vulnerability-scanner code-review gemini ultron chain-of-thought react',
+    keywords='sast code-analysis ai security vulnerability-scanner code-review devsecops auditing llm gemini ultron chain-of-thought react sarif',
     python_requires='>=3.10',
     zip_safe=False,
 )
